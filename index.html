@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    /* --- 기본 스타일 --- */
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Malgun Gothic', sans-serif;
+      user-select: none;
+      width: 100vw;
+      height: fit-content; 
+    }
+
+    #widget-container {
+      position: relative;
+      width: 100%;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      display: flex;
+      flex-direction: column;
+      transition: background 0.3s ease;
+      /* 높이 트랜지션은 드래그 반응속도를 위해 제거함 */
+    }
+
+    /* --- 상단 컨트롤 바 --- */
+    #top-bar {
+      height: 20px;
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 15px;
+      color: white;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      background: rgba(0,0,0,0.2);
+      z-index: 60;
+      position: relative;
+    }
+
+    #date-time-left { display: flex; align-items: baseline; gap: 10px; }
+    #date { font-size: 14px; color: rgba(255,255,255,0.9); font-weight: normal; }
+    #clock { font-weight: bold; font-size: 18px; letter-spacing: 0.5px; }
+
+    #top-icons { display: flex; gap: 15px; align-items: center; }
+    .icon-btn {
+      background: none; border: none; color: rgba(255,255,255,0.7);
+      font-size: 18px; cursor: pointer; padding: 5px;
+      transition: color 0.2s, transform 0.2s;
+    }
+    .icon-btn:hover { color: white; transform: scale(1.1); }
+    .icon-btn.pinned { color: #56ccf2; } 
+    .icon-btn.active { color: #f7b731; transform: rotate(45deg); }
+
+
+    /* --- 설정 패널 (Overlay) --- */
+    #settings-panel {
+      display: none;
+      position: absolute;
+      top: 40px;
+      left: 0;
+      width: 100%;
+      background: rgba(40, 40, 40, 0.98);
+      padding: 15px 20px;
+      box-sizing: border-box;
+      border-bottom: 1px solid rgba(255,255,255,0.2);
+      z-index: 50;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+      animation: fadeIn 0.2s ease-out;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .setting-group { margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between; }
+    .setting-label { font-size: 13px; color: #ccc; }
+    .setting-value-text { font-size: 13px; color: #56ccf2; font-weight: bold; width: 40px; text-align: right;}
+    
+    .time-input-set {
+      width: 50px; height: 26px; background: #555; border: 1px solid #777; color: white;
+      text-align: center; border-radius: 4px; font-weight: bold; font-size: 13px;
+    }
+    input[type=range] { width: 120px; cursor: pointer; accent-color: #56ccf2; }
+
+
+    /* --- 타임라인 영역 --- */
+    #timeline-track {
+      position: relative;
+      flex-grow: 1;
+      width: 100%;
+      cursor: crosshair;
+      overflow: hidden;
+      min-height: 80px; 
+      padding-bottom: 10px; /* 리사이즈 핸들 공간 확보 */
+    }
+    .hour-marker {
+      position: absolute; top: 0; bottom: 0;
+      border-left: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5);
+      font-size: 11px; padding-left: 4px; pointer-events: none;
+    }
+    #current-time-line {
+      position: absolute; top: 0; bottom: 0; width: 2px;
+      background: #ff4757; z-index: 5; pointer-events: none; box-shadow: 0 0 5px red;
+    }
+    #selection-box {
+      position: absolute; top: 0; bottom: 0;
+      background: rgba(86, 204, 242, 0.3); border: 1px dashed rgba(255,255,255,0.8);
+      display: none; pointer-events: none; z-index: 15;
+    }
+
+
+    /* --- 일정 블록 --- */
+    .schedule-block {
+      position: absolute;
+      border-radius: 4px; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      cursor: pointer; font-weight: bold; z-index: 10; padding: 0 10px;
+      overflow: hidden; min-width: 10px; border: 1px solid rgba(255,255,255,0.2);
+    }
+    .schedule-block:hover { filter: brightness(1.1); z-index: 20; box-shadow: 0 4px 8px rgba(0,0,0,0.4); }
+    .resize-handle {
+      position: absolute; top: 0; bottom: 0; width: 10px; cursor: col-resize;
+      background: rgba(255,255,255,0.2); opacity: 0; transition: opacity 0.2s;
+    }
+    .schedule-block:hover .resize-handle { opacity: 1; }
+    .handle-left { left: 0; } .handle-right { right: 0; }
+
+
+    /* --- 🔥 [추가] 하단 윈도우 리사이즈 핸들바 --- */
+    #bottom-resize-handle {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 8px; /* 잡기 편한 두께 */
+      cursor: ns-resize; /* 상하 화살표 커서 */
+      z-index: 100;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    /* 핸들 디자인 (작은 점 3개) */
+    #bottom-resize-handle::after {
+      content: '•••';
+      color: rgba(255,255,255,0.3);
+      font-size: 10px;
+      letter-spacing: 2px;
+      margin-bottom: 2px;
+    }
+    #bottom-resize-handle:hover {
+      background: rgba(255,255,255,0.1); /* 마우스 올리면 살짝 표시 */
+    }
+
+
+    /* --- 일정 입력 모달 --- */
+    #schedule-modal {
+      position: fixed; 
+      top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 90%; max-width: 500px;
+      background: #3a3a3a; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      z-index: 9999; display: none;
+      flex-direction: column; padding: 15px; gap: 10px;
+    }
+    
+    .modal-row { display: flex; align-items: center; gap: 10px; justify-content: space-between;}
+    .modal-input {
+      background: #444; border: 1px solid #666; color: white;
+      padding: 5px 10px; border-radius: 6px; height: 36px; font-size: 14px; outline: none; flex: 1;
+    }
+    .modal-time { text-align: center; max-width: 80px;}
+
+    .color-circle {
+      width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+      border: 2px solid transparent; transition: transform 0.2s;
+    }
+    .color-circle.selected { border-color: white; transform: scale(1.1); box-shadow: 0 0 8px rgba(255,255,255,0.6); }
+    
+    .btn {
+      height: 36px; padding: 0 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px;
+    }
+    .btn-save { background: #56ccf2; color: #222; width: 100%;} 
+    .btn-cancel { background: #666; color: white; width: 100%;}
+    .btn-delete { background: #ff4757; color: white; width: 100%; display: none; }
+
+  </style>
+</head>
+<body>
+
+  <div id="widget-container">
+    
+    <div id="top-bar">
+      <div id="date-time-left">
+        <span id="date">1월 1일 (월)</span>
+        <span id="clock">00:00</span>
+      </div>
+      <div id="top-icons">
+        <button id="btn-open-settings" class="icon-btn" title="설정 열기/닫기">⚙️</button>
+        <button id="btn-toggle-pin" class="icon-btn pinned" title="항상 위에 고정/해제">📌</button>
+        <button id="btn-app-close" class="icon-btn" title="위젯 종료">✖️</button>
+      </div>
+    </div>
+
+    <div id="settings-panel">
+      <div class="setting-group">
+        <span class="setting-label">표시 시간</span>
+        <div style="display:flex; align-items:center; gap:5px;">
+          <input type="number" id="set-start-hour" class="time-input-set" min="0" max="23">
+          <span style="color:#ccc;">~</span>
+          <input type="number" id="set-end-hour" class="time-input-set" min="1" max="24">
+        </div>
+      </div>
+      
+      <div class="setting-group">
+        <span class="setting-label">배경 투명도</span>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <input type="range" id="set-opacity" min="0.1" max="1" step="0.1">
+          <span id="opacity-val-disp" class="setting-value-text">90%</span>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <span class="setting-label">글자 크기</span>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <input type="range" id="set-font-size" min="10" max="16" step="1" value="12">
+          <span id="font-size-disp" class="setting-value-text">12px</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="timeline-track">
+      <div id="current-time-line"></div>
+      <div id="selection-box"></div>
+    </div>
+
+    <div id="bottom-resize-handle" title="드래그하여 높이 조절"></div>
+
+  </div>
+
+  <div id="schedule-modal">
+    <div class="modal-row">
+      <input type="text" id="modal-title" class="modal-input" placeholder="일정 이름">
+    </div>
+    <div class="modal-row">
+      <input type="time" id="modal-start" class="modal-input modal-time">
+      <span style="color:white;">~</span>
+      <input type="time" id="modal-end" class="modal-input modal-time">
+    </div>
+    <div class="modal-row" id="color-picker-container" style="justify-content: center; gap: 8px; margin: 5px 0;"></div>
+    <div class="modal-row">
+      <button class="btn btn-save" id="btn-save-schedule">저장</button>
+      <button class="btn btn-cancel" id="btn-cancel-schedule">취소</button>
+      <button class="btn btn-delete" id="btn-delete-schedule">삭제</button>
+    </div>
+  </div>
+
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    const widgetContainer = document.getElementById('widget-container');
+    const settingsPanel = document.getElementById('settings-panel');
+    const track = document.getElementById('timeline-track');
+    const bottomResizeHandle = document.getElementById('bottom-resize-handle');
+    
+    const btnOpenSettings = document.getElementById('btn-open-settings');
+    const btnTogglePin = document.getElementById('btn-toggle-pin');
+    const btnAppClose = document.getElementById('btn-app-close');
+
+    // 설정 기본값 (manualHeight 추가됨)
+    let schedules = JSON.parse(localStorage.getItem('timelineSchedules')) || [];
+    let config = JSON.parse(localStorage.getItem('widgetConfig')) || { 
+      start: 9, end: 18, pinned: true, fontSize: 12, manualHeight: 120 
+    };
+
+    updatePinState(config.pinned);
+    
+    const setStartHour = document.getElementById('set-start-hour');
+    const setEndHour = document.getElementById('set-end-hour');
+    const setOpacity = document.getElementById('set-opacity');
+    const opacityDisp = document.getElementById('opacity-val-disp');
+    const setFontSize = document.getElementById('set-font-size');
+    const fontSizeDisp = document.getElementById('font-size-disp');
+
+    // 초기화
+    setStartHour.value = config.start;
+    setEndHour.value = config.end;
+    setOpacity.value = 0.9;
+    const currentFontSize = config.fontSize || 12;
+    setFontSize.value = currentFontSize;
+    fontSizeDisp.innerText = `${currentFontSize}px`;
+
+    // --- 설정 패널 로직 ---
+    let isSettingsOpen = false;
+
+    btnOpenSettings.addEventListener('click', () => {
+      isSettingsOpen = !isSettingsOpen;
+      if (isSettingsOpen) {
+        settingsPanel.style.display = 'block';
+        btnOpenSettings.classList.add('active');
+      } else {
+        settingsPanel.style.display = 'none';
+        btnOpenSettings.classList.remove('active');
+      }
+      updateWindowHeight();
+    });
+
+    // --- 🔥 [핵심] 높이 계산 및 업데이트 함수 ---
+    function updateWindowHeight(overrideHeight = null) {
+      // 1. 내용물에 따른 최소 필요 높이 계산 (일정이 잘리지 않게)
+      const rowHeight = 25; const rowGap = 5; const baseTop = 10;
+      let maxRowIndex = 0;
+      schedules.forEach(sch => { if(sch.row > maxRowIndex) maxRowIndex = sch.row; });
+      
+      const timelineHeight = baseTop + ((maxRowIndex + 1) * (rowHeight + rowGap)) + 30; // 하단 핸들 여유공간
+      const contentMinHeight = 40 + Math.max(80, timelineHeight); // 상단바 + 타임라인
+
+      // 2. 사용자가 설정한 수동 높이 (config.manualHeight)
+      let userHeight = overrideHeight || config.manualHeight || 120;
+      
+      // 3. 설정창이 열렸을 때 높이
+      let settingsHeight = 0;
+      if (isSettingsOpen) settingsHeight = 40 + settingsPanel.scrollHeight + 10;
+
+      // 4. 모달 높이
+      let modalHeight = 0;
+      if (scheduleModal.style.display === 'flex') modalHeight = scheduleModal.scrollHeight + 50;
+
+      // 🔥 최종 결정: [내용물 높이]와 [사용자 설정 높이] 중 큰 값을 사용
+      // 단, 설정창이나 모달이 열리면 그만큼은 무조건 확보
+      const finalHeight = Math.max(120, contentMinHeight, userHeight, settingsHeight, modalHeight);
+      
+      widgetContainer.style.height = `${finalHeight}px`;
+      ipcRenderer.send('resize-window', finalHeight);
+    }
+
+    // --- 🔥 [추가] 하단 리사이즈 핸들 드래그 로직 ---
+    let isResizingHeight = false;
+
+    bottomResizeHandle.addEventListener('mousedown', (e) => {
+      isResizingHeight = true;
+      e.preventDefault(); // 텍스트 선택 방지
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isResizingHeight) return;
+      
+      // 마우스 Y 좌표가 곧 새로운 높이 (단, 최소 120px 제한)
+      const newHeight = Math.max(120, e.clientY);
+      
+      // 즉시 반영 (부드러운 드래그를 위해)
+      updateWindowHeight(newHeight);
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (!isResizingHeight) return;
+      isResizingHeight = false;
+      
+      // 드래그가 끝나면 최종 높이를 저장 (단, 최소 120px)
+      config.manualHeight = Math.max(120, e.clientY);
+      saveConfig();
+      updateWindowHeight(); // 저장된 값으로 정식 업데이트
+    });
+
+
+    // --- 이벤트 리스너 ---
+    setStartHour.addEventListener('change', () => { config.start = parseInt(setStartHour.value); saveConfig(); renderView(); });
+    setEndHour.addEventListener('change', () => { config.end = parseInt(setEndHour.value); saveConfig(); renderView(); });
+    setOpacity.addEventListener('input', (e) => {
+      widgetContainer.style.background = `rgba(0, 0, 0, ${e.target.value * 0.7})`;
+      opacityDisp.innerText = `${Math.round(e.target.value * 100)}%`;
+    });
+    setFontSize.addEventListener('input', (e) => {
+      config.fontSize = e.target.value;
+      fontSizeDisp.innerText = `${config.fontSize}px`;
+      saveConfig(); renderView();
+    });
+
+    btnTogglePin.addEventListener('click', () => {
+      config.pinned = !config.pinned; updatePinState(config.pinned); saveConfig(); ipcRenderer.send('toggle-pin', config.pinned);
+    });
+    btnAppClose.addEventListener('click', () => ipcRenderer.send('close-window'));
+
+    function updatePinState(pinned) {
+      if(pinned) btnTogglePin.classList.add('pinned'); else btnTogglePin.classList.remove('pinned');
+    }
+    function saveConfig() { localStorage.setItem('widgetConfig', JSON.stringify(config)); }
+
+
+    // --- 타임라인 렌더링 ---
+    const clockEl = document.getElementById('clock');
+    const dateEl = document.getElementById('date');
+    const timeLine = document.getElementById('current-time-line');
+    
+    function renderView() {
+      document.querySelectorAll('.hour-marker, .schedule-block').forEach(el => el.remove());
+      
+      const range = config.end - config.start;
+      for (let i = config.start; i <= config.end; i++) {
+        const percent = ((i - config.start) / range) * 100;
+        if (percent >= 0 && percent <= 100) {
+          const div = document.createElement('div');
+          div.className = 'hour-marker'; div.style.left = `${percent}%`; div.innerText = i;
+          track.appendChild(div);
+        }
+      }
+
+      let sortedSchedules = [...schedules].sort((a, b) => a.start - b.start);
+      let layoutRows = [];
+      sortedSchedules.forEach(sch => {
+        let placed = false;
+        for (let i = 0; i < layoutRows.length; i++) {
+          if (layoutRows[i] <= sch.start) { sch.row = i; layoutRows[i] = sch.end; placed = true; break; }
+        }
+        if (!placed) { sch.row = layoutRows.length; layoutRows.push(sch.end); }
+      });
+
+      const rowHeight = 25; const rowGap = 5; const baseTop = 10;
+      
+      sortedSchedules.forEach(sch => {
+        const startPercent = ((sch.start - config.start) / range) * 100;
+        const durationPercent = ((sch.end - sch.start) / range) * 100;
+
+        const block = document.createElement('div');
+        block.className = 'schedule-block';
+        block.innerText = sch.title;
+        block.style.left = `${startPercent}%`;
+        block.style.width = `${durationPercent}%`;
+        block.style.backgroundColor = sch.color || '#4b6584';
+        block.style.top = `${baseTop + (sch.row * (rowHeight + rowGap))}px`;
+        block.style.height = `${rowHeight}px`;
+        block.style.fontSize = `${config.fontSize || 12}px`;
+
+        const lH = document.createElement('div'); lH.className = 'resize-handle handle-left';
+        const rH = document.createElement('div'); rH.className = 'resize-handle handle-right';
+        block.append(lH, rH);
+        setupResize(block, sch, 'left', lH); setupResize(block, sch, 'right', rH);
+
+        block.addEventListener('click', (e) => {
+          if(e.target.classList.contains('resize-handle')) return;
+          openScheduleModal(sch);
+        });
+        track.appendChild(block);
+      });
+
+      // 렌더링 시 저장된 높이값으로 복원
+      updateWindowHeight();
+      updateTime();
+    }
+
+    function updateTime() {
+      const now = new Date();
+      const h = now.getHours(); const m = now.getMinutes();
+      clockEl.innerText = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      const days = ['일', '월', '화', '수', '목', '금', '토'];
+      dateEl.innerText = `${now.getMonth()+1}월 ${now.getDate()}일 (${days[now.getDay()]})`;
+
+      const currentDecimal = h + (m / 60);
+      const range = config.end - config.start;
+      const percent = ((currentDecimal - config.start) / range) * 100;
+      if (percent >= 0 && percent <= 100) {
+        timeLine.style.display = 'block'; timeLine.style.left = `${percent}%`;
+      } else { timeLine.style.display = 'none'; }
+    }
+
+
+    // --- 일정 입력 모달 로직 ---
+    const scheduleModal = document.getElementById('schedule-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalStart = document.getElementById('modal-start');
+    const modalEnd = document.getElementById('modal-end');
+    const colorBox = document.getElementById('color-picker-container');
+    const btnSave = document.getElementById('btn-save-schedule');
+    const btnCancel = document.getElementById('btn-cancel-schedule');
+    const btnDelete = document.getElementById('btn-delete-schedule');
+    
+    let editingId = null;
+    let tempColor = '#4b6584';
+    const palette = ['#4b6584', '#26de81', '#f7b731', '#eb3b5a', '#a55eea', '#45aaf2'];
+
+    function openScheduleModal(schedule, sHour, eHour) {
+      scheduleModal.style.display = 'flex';
+      renderColorPicker();
+      
+      if(schedule) {
+        editingId = schedule.id;
+        modalTitle.value = schedule.title;
+        modalStart.value = decimalToTimeStr(schedule.start);
+        modalEnd.value = decimalToTimeStr(schedule.end);
+        selectColor(schedule.color || palette[0]);
+        btnDelete.style.display = 'block';
+      } else {
+        editingId = null;
+        modalTitle.value = '';
+        modalStart.value = decimalToTimeStr(sHour);
+        modalEnd.value = decimalToTimeStr(eHour);
+        selectColor(palette[0]);
+        btnDelete.style.display = 'none';
+      }
+      updateWindowHeight();
+    }
+
+    function closeScheduleModal() {
+      scheduleModal.style.display = 'none';
+      updateWindowHeight();
+    }
+
+    btnCancel.addEventListener('click', closeScheduleModal);
+    
+    btnDelete.addEventListener('click', () => {
+      if(confirm('삭제하시겠습니까?')) {
+        schedules = schedules.filter(s => s.id !== editingId);
+        localStorage.setItem('timelineSchedules', JSON.stringify(schedules));
+        renderView(); closeScheduleModal();
+      }
+    });
+
+    btnSave.addEventListener('click', () => {
+      const title = modalTitle.value.trim();
+      const s = timeStrToDecimal(modalStart.value);
+      const e = timeStrToDecimal(modalEnd.value);
+      
+      if(!title || isNaN(s) || isNaN(e) || s >= e) return alert('입력값 확인');
+
+      if(editingId) {
+        const t = schedules.find(x => x.id === editingId);
+        if(t) { t.title = title; t.start = s; t.end = e; t.color = tempColor; }
+      } else {
+        schedules.push({ id: Date.now(), title, start: s, end: e, color: tempColor });
+      }
+      localStorage.setItem('timelineSchedules', JSON.stringify(schedules));
+      renderView(); closeScheduleModal();
+    });
+
+    function renderColorPicker() {
+      colorBox.innerHTML = '';
+      palette.forEach(c => {
+        const d = document.createElement('div');
+        d.className = 'color-circle'; d.style.background = c;
+        d.onclick = () => selectColor(c, d);
+        colorBox.appendChild(d);
+      });
+    }
+    function selectColor(c, el) {
+      tempColor = c;
+      document.querySelectorAll('.color-circle').forEach(x => x.classList.remove('selected'));
+      if(el) el.classList.add('selected');
+      else {
+        const found = Array.from(document.querySelectorAll('.color-circle')).find(x => x.style.backgroundColor == c);
+        if(found) found.classList.add('selected');
+      }
+    }
+
+    // --- 드래그 생성 ---
+    let dragStart = 0; let isDragging = false;
+    const selectionBox = document.getElementById('selection-box');
+
+    track.addEventListener('mousedown', (e) => {
+      if(e.target.classList.contains('schedule-block') || e.target.classList.contains('resize-handle')) return;
+      isDragging = true; dragStart = e.clientX;
+      selectionBox.style.display = 'block'; selectionBox.style.width = '0px';
+      settingsPanel.style.display = 'none';
+      isSettingsOpen = false; btnOpenSettings.classList.remove('active');
+      updateWindowHeight();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if(!isDragging) return;
+      const w = Math.abs(e.clientX - dragStart);
+      const l = Math.min(dragStart, e.clientX);
+      selectionBox.style.width = `${w}px`; selectionBox.style.left = `${l}px`;
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if(!isDragging) return;
+      isDragging = false; selectionBox.style.display = 'none';
+      if(Math.abs(e.clientX - dragStart) < 5) return;
+      
+      const w = track.clientWidth; const range = config.end - config.start;
+      const s = config.start + (Math.min(dragStart, e.clientX) / w * range);
+      const end = config.start + (Math.max(dragStart, e.clientX) / w * range);
+      openScheduleModal(null, s, end);
+    });
+
+    // --- 리사이즈 헬퍼 ---
+    function setupResize(block, sch, type, handle) {
+      handle.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const startX = e.clientX; const w = track.clientWidth; const range = config.end - config.start;
+        const origL = parseFloat(block.style.left); const origW = parseFloat(block.style.width);
+
+        function move(ev) {
+          const deltaP = (ev.clientX - startX) / w * 100;
+          if(type === 'right') block.style.width = `${Math.max(1, origW + deltaP)}%`;
+          else {
+             block.style.left = `${origL + deltaP}%`; block.style.width = `${Math.max(1, origW - deltaP)}%`;
+          }
+        }
+        function up() {
+          window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up);
+          sch.start = config.start + (parseFloat(block.style.left)/100 * range);
+          sch.end = sch.start + (parseFloat(block.style.width)/100 * range);
+          localStorage.setItem('timelineSchedules', JSON.stringify(schedules)); renderView();
+        }
+        window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+      });
+    }
+
+    function decimalToTimeStr(d) {
+      const h = Math.floor(d); const m = Math.round((d-h)*60);
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    }
+    function timeStrToDecimal(s) {
+      const [h,m] = s.split(':').map(Number); return h + m/60;
+    }
+
+    renderView();
+    setInterval(updateTime, 1000);
+
+  </script>
+</body>
+</html>
