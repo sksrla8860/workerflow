@@ -1,0 +1,19 @@
+# 의존성 모듈 (가장 중요!)
+node_modules/
+
+# 빌드 결과물 (exe 파일 등)
+dist/
+release/
+build/
+
+# 환경 변수 파일 (API 키 등 보안 정보가 있다면)
+.env
+
+# 로그 파일
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS 시스템 파일
+.DS_Store
+Thumbs.db
