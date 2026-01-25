@@ -1,18 +1,29 @@
 {
-  "name": "workerflow",
+  "name": "worker-flow",
+  "productName": "WorkerFlow",
   "version": "1.0.0",
+  "description": "Desktop Timeline Widget",
   "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "electron .",
+    "build": "electron-builder"
   },
-  "keywords": [],
-  "author": "",
+  "author": "User",
   "license": "ISC",
-  "description": "",
   "dependencies": {
-    "electron": "^40.0.0"
   },
-  "scripts": {
-    "start": "electron ."
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.workerflow.widget",
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "directories": {
+      "output": "dist"
+    }
   }
 }
