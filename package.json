@@ -1,29 +1,54 @@
 {
   "name": "worker-flow",
   "productName": "WorkerFlow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop Timeline Widget",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
   },
-  "author": "User",
+  "author": "shinetic",
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/local-auth": "^3.0.1",
+    "googleapis": "^171.4.0"
   },
   "devDependencies": {
     "electron": "^34.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.workerflow.widget",
+    "appId": "com.shinetic.workerflow",
+    "productName": "WorkerFlow",
     "win": {
-      "target": "nsis",
-      "icon": "icon.ico"
+      "target": [
+        "nsis",
+        "appx"
+      ],
+      "icon": "build/icon.png"
     },
-    "directories": {
-      "output": "dist"
+    "extraResources": [
+      {
+        "from": "icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WorkerFlow",
+      "runAfterFinish": true
+    },
+    "appx": {
+      "applicationId": "WorkerFlow",
+      "identityName": "shinetic.workerflow",
+      "publisher": "CN=23DB3E70-433B-4176-AB45-5B57DA2514FB",
+      "publisherDisplayName": "shinetic",
+      "backgroundColor": "#03D8A7"
     }
   }
 }
