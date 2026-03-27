@@ -17,3 +17,5 @@ yarn-error.log*
 # OS 시스템 파일
 .DS_Store
 Thumbs.db
+credentials.json
+token.json

@@ -109,6 +109,7 @@
         <span class="title">Calendar</span>
       </div>
       <div class="controls">
+        <button id="btn-sync-google" class="icon-btn" title="Sync Google">G</button>
         <button id="btn-pin" class="icon-btn" title="Pin">
           <svg viewBox="0 0 24 24"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg>
         </button>
@@ -123,11 +124,9 @@
         </button>
       </div>
     </div>
-
     <div id="calendar-wrapper">
       <div id="calendar"></div>
     </div>
-    
     <div id="cal-settings">
       <div style="margin-bottom:10px; font-weight:bold; font-size:13px; color:white;">Calendar Appearance</div>
       <div class="set-row">
@@ -139,6 +138,43 @@
         <input type="color" id="set-color" value="#000000">
       </div>
       <button class="save-btn" onclick="toggleSettings()">Close</button>
+    </div>
+    <div id="event-modal-bg" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; -webkit-app-region: no-drag;"></div>
+    <div id="event-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(30, 30, 30, 0.85); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; color: white; width: 350px; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.5); -webkit-app-region: no-drag;">
+      <h3 style="margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px;">새 일정 추가</h3>
+      <input type="text" id="m-title" placeholder="제목 추가" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: none; border-radius: 4px;">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; -webkit-app-region: no-drag;">
+        <input type="checkbox" id="m-allday" style="cursor: pointer; width: 16px; height: 16px;">
+        <label for="m-allday" style="cursor: pointer;">종일</label>
+      </div>
+      <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+        <input type="date" id="m-start-date" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+        <input type="time" id="m-start-time" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+      </div>
+      <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+        <input type="date" id="m-end-date" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+        <input type="time" id="m-end-time" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+      </div>
+      <input type="text" id="m-location" placeholder="장소 추가" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: none; border-radius: 4px;">
+      <textarea id="m-memo" placeholder="설명 및 메모" rows="3" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: none; border-radius: 4px; resize: none;"></textarea>
+      <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+        <select id="m-alarm" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+          <option value="none">알림 없음</option>
+          <option value="10">10분 전</option>
+          <option value="30">30분 전</option>
+        </select>
+        <select id="m-repeat" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+          <option value="none">반복 안함</option>
+          <option value="DAILY">매일</option>
+          <option value="WEEKLY">매주</option>
+          <option value="MONTHLY">매월</option>
+          <option value="YEARLY">매년</option>
+        </select>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button id="btn-cancel" style="padding: 8px 15px; cursor: pointer; background: #555; border: none; color: white; border-radius: 4px;">취소</button>
+        <button id="btn-save" style="padding: 8px 15px; cursor: pointer; background: #0078D7; border: none; color: white; border-radius: 4px;">저장</button>
+      </div>
     </div>
   </div>
 
@@ -153,6 +189,15 @@
     const opacityInput = document.getElementById('set-opacity');
     const colorInput = document.getElementById('set-color');
     const settingsPanel = document.getElementById('cal-settings');
+
+    // 팝업창 내용 초기화 함수
+    function clearEventModal() {
+      document.getElementById('m-title').value = '';       // 제목 비우기
+      document.getElementById('m-location').value = '';    // 장소 비우기
+      document.getElementById('m-memo').value = '';        // 메모 비우기
+      document.getElementById('m-alarm').value = '30';     // 알림 기본값(30분 전)으로 되돌리기
+      document.getElementById('m-repeat').value = 'none';  // 반복 기본값(반복 안함)으로 되돌리기
+    }
 
     function applyStyles() {
       // 16진수 컬러 -> RGBA 변환
@@ -211,6 +256,119 @@
 
         // 3. 메인 프로세스로 날짜 전송
         ipcRenderer.send('date-clicked', info.dateStr);
+      },
+      selectable: true, // 드래그 선택 허용
+      selectMirror: true, // 드래그 중일 때 임시 이벤트 보여주기
+
+      // 날짜를 드래그하거나 클릭했을 때 실행되는 함수!
+      select: function(info) {
+          document.getElementById('event-modal-bg').style.display = 'block';
+          document.getElementById('event-modal').style.display = 'block';
+
+          document.getElementById('m-start-date').value = info.startStr.split('T')[0];
+
+          // 🔥 달력에서 하루만 클릭했을 때 화면에 다음날이 찍히는 것 방지
+          let endStr = info.endStr.split('T')[0];
+          if (info.allDay) {
+            let endDateObj = new Date(endStr);
+            endDateObj.setDate(endDateObj.getDate() - 1); // 화면 표시용으로 하루를 뺌
+            
+            let year = endDateObj.getFullYear();
+            let month = String(endDateObj.getMonth() + 1).padStart(2, '0');
+            let day = String(endDateObj.getDate()).padStart(2, '0');
+            endStr = `${year}-${month}-${day}`;
+          }
+          document.getElementById('m-end-date').value = endStr;
+          
+          // 기본 시간 세팅
+          document.getElementById('m-start-time').value = "12:00"; 
+          document.getElementById('m-end-time').value = "13:00";
+
+          // 드래그한 영역에 따라 종일 스위치 상태 자동 조절
+          const alldayCheckbox = document.getElementById('m-allday');
+          alldayCheckbox.checked = info.allDay;
+          alldayCheckbox.dispatchEvent(new Event('change')); // 이벤트 강제 발생시켜 시간칸 숨기기
+        }
+    });
+    
+    // 1. 종일 체크박스 클릭 이벤트 (체크하면 시간 입력칸 숨기기)
+    document.getElementById('m-allday').addEventListener('change', (e) => {
+      const isAllDay = e.target.checked;
+      document.getElementById('m-start-time').style.display = isAllDay ? 'none' : 'inline-block';
+      document.getElementById('m-end-time').style.display = isAllDay ? 'none' : 'inline-block';
+    });
+    // 취소 버튼 누르면 창 닫기
+    document.getElementById('btn-cancel').addEventListener('click', () => {
+      document.getElementById('event-modal-bg').style.display = 'none';
+      document.getElementById('event-modal').style.display = 'none';
+      calendar.unselect();
+      
+      clearEventModal(); // 🔥 창 닫고 나서 내용 싹 비우기!
+    });
+
+    // 저장 버튼 누르면 데이터 묶어서 main.js로 보내기
+    document.getElementById('btn-save').addEventListener('click', () => {
+      const isAllDay = document.getElementById('m-allday').checked; // 체크 여부 확인
+      const startDate = document.getElementById('m-start-date').value;
+      const startTime = document.getElementById('m-start-time').value;
+      const endDate = document.getElementById('m-end-date').value;
+      const endTime = document.getElementById('m-end-time').value;
+
+      const myEventData = {
+          title: document.getElementById('m-title').value || '(제목 없음)',
+          isAllDay: isAllDay, // 🔥 종일 여부 추가
+          startDate: document.getElementById('m-start-date').value,
+          startTime: document.getElementById('m-start-time').value,
+          endDate: document.getElementById('m-end-date').value,
+          endTime: document.getElementById('m-end-time').value,
+          location: document.getElementById('m-location').value,
+          memo: document.getElementById('m-memo').value,
+          alarmMinutes: document.getElementById('m-alarm').value,
+          repeat: document.getElementById('m-repeat').value
+        };
+
+      // 팝업 닫고 전송
+      ipcRenderer.send('add-google-event', myEventData);
+
+      document.getElementById('event-modal-bg').style.display = 'none';
+      document.getElementById('event-modal').style.display = 'none';
+      calendar.unselect();
+      
+      clearEventModal(); // 🔥 저장(전송) 완료 후 창 내용 싹 비우기!
+    });
+
+    document.getElementById('btn-sync-google').addEventListener('click', () => {
+        // 메인 프로세스에 요청
+        ipcRenderer.send('get-google-events');
+    });
+
+    // 2. 데이터 받아서 달력에 뿌리기
+    ipcRenderer.on('google-events-reply', (event, events) => {
+        console.log("구글 일정 도착:", events);
+        
+        // FullCalendar에 일정 추가
+        var calendarEl = document.getElementById('calendar');
+        // (이미 생성된 calendar 객체에 접근해야 함. calendar 변수를 전역으로 빼거나 여기서 addEvent 사용)
+        
+        events.forEach(evt => {
+            // 기존 FullCalendar 객체에 이벤트 추가
+            calendar.addEvent({
+                title: evt.title,
+                start: evt.start,
+                color: evt.color
+            });
+        });
+        
+        alert('구글 캘린더 연동 성공! ' + events.length + '개의 일정을 가져왔습니다.');
+    });
+
+    // main.js에서 추가가 끝난 후 보내는 결과 받기
+    ipcRenderer.on('add-google-event-reply', (event, result) => {
+      if (result.success) {
+        alert('구글 캘린더에 일정이 성공적으로 추가되었습니다!\n웹에서 확인해보세요.');
+        console.log('구글 캘린더 링크:', result.link);
+      } else {
+        alert('일정 추가 실패: ' + result.error);
       }
     });
     

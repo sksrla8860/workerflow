@@ -1,5 +1,8 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, nativeImage, Menu } = require('electron');
 const path = require('path');
+//const { authenticate } = require('@google-cloud/local-auth');
+const { google } = require('googleapis');
+const fs = require('fs').promises;
 
 // 하드웨어 가속 끄기 (화면 깨짐 및 좌표 오류 방지)
 //app.disableHardwareAcceleration();
@@ -262,4 +265,223 @@ ipcMain.on('set-auto-start', (event, isEnabled) => {
 ipcMain.on('force-quit', () => {
   isQuitting = true;
   app.quit();
+});
+const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+const TOKEN_PATH = path.join(__dirname, 'token.json'); // 로그인 정보 저장할 파일
+const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json'); // 아까 다운받은 키 파일
+
+/**
+ * 저장된 토큰이 있으면 불러오고, 없으면 새로 로그인창을 띄우는 함수
+ */
+async function loadSavedCredentialsIfExist() {
+  try {
+    const content = await fs.readFile(TOKEN_PATH);
+    const credentials = JSON.parse(content);
+    return google.auth.fromJSON(credentials);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function saveCredentials(client) {
+  const content = await fs.readFile(CREDENTIALS_PATH);
+  const keys = JSON.parse(content);
+  const key = keys.installed || keys.web;
+  const payload = JSON.stringify({
+    type: 'authorized_user',
+    client_id: key.client_id,
+    client_secret: key.client_secret,
+    refresh_token: client.credentials.refresh_token,
+  });
+  await fs.writeFile(TOKEN_PATH, payload);
+}
+
+function signInWithPopup() {
+  return new Promise(async (resolve, reject) => {
+    // 3-1. 키 파일 읽기
+    const content = await fs.readFile(CREDENTIALS_PATH);
+    const keys = JSON.parse(content);
+    const key = keys.installed || keys.web;
+    
+    // 리다이렉트 주소는 키 파일에 있는 첫 번째 주소(보통 http://localhost) 사용
+    const redirectUri = key.redirect_uris[0]; 
+
+    // OAuth2 클라이언트 생성
+    const oauth2Client = new google.auth.OAuth2(
+      key.client_id,
+      key.client_secret,
+      redirectUri
+    );
+
+    // 구글 로그인 화면 URL 생성
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: SCOPES,
+    });
+
+    // 3-2. 일렉트론 미니 창(BrowserWindow) 생성
+    const authWindow = new BrowserWindow({
+      width: 500,
+      height: 600,
+      show: false,
+      alwaysOnTop: true, // 항상 앱 위에 뜨게
+      title: 'Google 계정으로 로그인',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      }
+    });
+
+    authWindow.loadURL(authUrl);
+    authWindow.show();
+
+    // 3-3. URL 변경 감시 (성공해서 넘어가는 순간 낚아채기)
+    const handleNavigation = async (url) => {
+      if (url.startsWith(redirectUri)) {
+        const urlObj = new URL(url);
+        const code = urlObj.searchParams.get('code');
+        const error = urlObj.searchParams.get('error');
+
+        if (code) {
+          try {
+            // 코드를 토큰으로 교환
+            const { tokens } = await oauth2Client.getToken(code);
+            oauth2Client.setCredentials(tokens);
+            await saveCredentials(oauth2Client); // 토큰 저장
+            resolve(oauth2Client);
+          } catch (err) {
+            reject(err);
+          }
+        } else if (error) {
+          reject(new Error(error));
+        }
+
+        // 🔥 로그인 처리가 끝났으니 창을 닫아버립니다!
+        authWindow.close(); 
+      }
+    };
+
+    // 리다이렉트나 페이지 이동이 일어날 때마다 검사
+    authWindow.webContents.on('will-redirect', (event, url) => {
+      handleNavigation(url);
+    });
+    authWindow.webContents.on('will-navigate', (event, url) => {
+      handleNavigation(url);
+    });
+
+    // 사용자가 'X' 버튼을 눌러 강제로 닫은 경우
+    authWindow.on('closed', () => {
+      reject(new Error('로그인 창이 닫혔습니다.'));
+    });
+  });
+}
+
+async function authorize() {
+  let client = await loadSavedCredentialsIfExist();
+  if (client) {
+    return client;
+  }
+  // 저장된 토큰이 없으면 미니 창을 띄워서 로그인!
+  return await signInWithPopup();
+}
+
+// 📌 [IPC 핸들러 추가] 렌더러에서 "구글 일정 가져워!" 하면 실행됨
+ipcMain.on('get-google-events', async (event) => {
+  try {
+    const auth = await authorize(); // 로그인 시도
+    const calendar = google.calendar({ version: 'v3', auth });
+    
+    // 캘린더에서 '오늘부터 10개' 일정 가져오기
+    const res = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: new Date().toISOString(),
+      maxResults: 10,
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+    
+    const events = res.data.items;
+    if (!events || events.length === 0) {
+      console.log('No upcoming events found.');
+      event.reply('google-events-reply', []);
+    } else {
+      console.log('Upcoming 10 events:');
+      // 필요한 데이터만 추려서 보냄
+      const simpleEvents = events.map((event, i) => {
+        const start = event.start.dateTime || event.start.date;
+        return {
+            title: event.summary,
+            start: start, // "2026-02-12T10:00:00+09:00" 형태
+            color: '#4285F4' // 구글 색상
+        };
+      });
+      // 렌더러로 결과 전송
+      event.reply('google-events-reply', simpleEvents);
+    }
+  } catch (err) {
+    console.error('Error loading Google Calendar:', err);
+  }
+});
+
+// [main.js] 파일 하단 (기존 get-google-events 코드 아래에 추가)
+
+// [main.js] 일정 추가 통신 부분 수정
+
+ipcMain.on('add-google-event', async (event, eventData) => {
+  try {
+    const auth = await authorize(); 
+    const calendar = google.calendar({ version: 'v3', auth });
+
+    // 🔥 알림(Reminder) 세팅을 먼저 조건문으로 만듭니다.
+    const reminderSettings = { useDefault: false, overrides: [] };
+
+    // 'none'이 아닐 때만 팝업 알림 시간을 배열에 추가합니다.
+    if (eventData.alarmMinutes !== 'none') {
+      reminderSettings.overrides.push({ method: 'popup', minutes: parseInt(eventData.alarmMinutes, 10) });
+    }
+
+    let startSettings, endSettings;
+    if (eventData.isAllDay) {
+      // 종일 일정 (시간 생략)
+      // 구글에 보낼 때는 다시 규칙에 맞게 종료일에 +1일을 해줍니다.
+      const endObj = new Date(eventData.endDate);
+      endObj.setDate(endObj.getDate() + 1);
+      const googleEndDate = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, '0')}-${String(endObj.getDate()).padStart(2, '0')}`;
+
+      startSettings = { date: eventData.startDate };
+      endSettings = { date: googleEndDate };
+    } else {
+      // 시간 포함 일정
+      startSettings = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone: 'Asia/Seoul' };
+      endSettings = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone: 'Asia/Seoul' };
+    }
+
+    // 2. 일정 세팅
+    const newEvent = {
+      summary: eventData.title,
+      location: eventData.location,       
+      description: eventData.memo,        
+      start: startSettings, // 위에서 세팅한 값을 넣음
+      end: endSettings,     // 위에서 세팅한 값을 넣음
+      reminders: reminderSettings,
+    };
+
+    // 🔄 반복 설정 추가 (구글 캘린더의 반복 규칙 RFC5545 포맷)
+    if (eventData.repeat !== 'none') {
+      // 예: 'RRULE:FREQ=DAILY' (매일 반복)
+      newEvent.recurrence = [`RRULE:FREQ=${eventData.repeat}`]; 
+    }
+
+    // 3. 구글에 전송
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      resource: newEvent,
+    });
+
+    event.reply('add-google-event-reply', { success: true, link: response.data.htmlLink });
+
+  } catch (err) {
+    console.error('구글 캘린더 일정 등록 실패:', err);
+    event.reply('add-google-event-reply', { success: false, error: err.message });
+  }
 });
