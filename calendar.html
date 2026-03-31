@@ -9,31 +9,29 @@
     :root {
       --accent-color: #56ccf2;
       --text-main: #ffffff;
-      --text-sub: #rgba(255, 255, 255, 0.6);
+      --text-sub: rgba(255, 255, 255, 0.6);
     }
 
     * { box-sizing: border-box; font-family: "Pretendard", sans-serif; user-select: none; }
 
     body { 
       margin: 0; 
-      /* 기본 배경은 투명, JS로 제어 */
       background: transparent; 
       color: var(--text-main); 
       overflow: hidden; 
       display: flex; flex-direction: column; height: 100vh; 
     }
 
-    /* --- 메인 컨테이너 (글래스모피즘 효과 적용 대상) --- */
+    /* --- 메인 컨테이너 --- */
     #app-container {
       width: 100%; height: 100%;
-      background: rgba(3, 216, 167, 0.2); /* 기본값 (JS로 덮어씌워짐) */
-      /* backdrop-filter: blur(10px) saturate(150%); 🔥 리얼한 유리 효과 */
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 16px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
       display: flex; flex-direction: column;
       overflow: hidden;
-      transition: background 0.3s;
+      transition: background 0.3s ease;
+      /* backdrop-filter: blur(10px) saturate(150%); 
+      -webkit-backdrop-filter: blur(10px) saturate(150%); */
     }
 
     /* --- 상단 타이틀바 --- */
@@ -49,7 +47,7 @@
     
     .controls { -webkit-app-region: no-drag; display: flex; gap: 4px; }
     
-    /* 공통 아이콘 버튼 스타일 */
+    /* 아이콘 버튼 공통 */
     .icon-btn { 
       background: transparent; border: none; color: rgba(255,255,255,0.6); 
       cursor: pointer; padding: 6px; border-radius: 6px; transition: 0.2s; 
@@ -62,7 +60,7 @@
     /* --- 달력 영역 --- */
     #calendar-wrapper { flex: 1; padding: 20px; overflow-y: auto; }
     
-    /* FullCalendar 커스텀 (투명도 유지) */
+    /* FullCalendar 커스텀 */
     .fc-theme-standard td, .fc-theme-standard th { border-color: rgba(255, 255, 255, 0.08); }
     .fc-toolbar-title { font-size: 20px !important; font-weight: 700; }
     .fc-button { 
@@ -76,15 +74,14 @@
     .fc-daygrid-day:hover { background: rgba(255,255,255,0.05); cursor: pointer; }
     .fc-col-header-cell-cushion { color: rgba(255,255,255,0.5); font-weight: normal; text-decoration: none; }
     .fc-daygrid-day-number { color: rgba(255,255,255,0.8); text-decoration: none; padding: 8px; }
-    .fc-day-today { background: rgba(86, 204, 242, 0.05) !important; }
-/* --- [추가/수정] 날짜 표시 디자인 --- */
-
-    .fc-day-today { background: rgba(86, 204, 242, 0.1) !important; /* 액센트 컬러의 10% 투명도 */ position: relative; }
+    
+    /* 날짜 표시 디자인 */
+    .fc-day-today { background: rgba(86, 204, 242, 0.1) !important; position: relative; }
     .fc-day-today .fc-daygrid-day-top::after { content: ''; position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); width: 4px; height: 4px; background: var(--accent-color); border-radius: 50%; }
-
-    .fc-day-selected { background: rgba(86, 204, 242, 0.25) !important; /* 좀 더 진한 배경 */ box-shadow: inset 0 0 0 2px var(--accent-color) !important; /* 안쪽 테두리(Glow 효과) */ transition: all 0.2s ease; }
+    .fc-day-selected { background: rgba(86, 204, 242, 0.25) !important; box-shadow: inset 0 0 0 2px var(--accent-color) !important; transition: all 0.2s ease; }
     .fc-daygrid-day:hover { background: rgba(255, 255, 255, 0.1) !important; cursor: pointer; }
-    /* --- 설정 패널 (캘린더 전용) --- */
+    
+    /* --- 설정 패널 --- */
     #cal-settings {
       position: absolute; top: 55px; right: 16px; width: 260px;
       background: rgba(30, 30, 30, 0.95); backdrop-filter: blur(20px);
@@ -98,6 +95,10 @@
     input[type=color] { border: none; width: 30px; height: 30px; background: none; cursor: pointer; }
     .save-btn { width: 100%; padding: 8px; background: var(--accent-color); border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 5px;}
 
+    /* --- 모달 공통 스타일 --- */
+    .modal-input {
+      background: #333; color: white; border: none; border-radius: 4px; padding: 8px;
+    }
   </style>
 </head>
 <body>
@@ -124,46 +125,55 @@
         </button>
       </div>
     </div>
+
     <div id="calendar-wrapper">
       <div id="calendar"></div>
     </div>
+
     <div id="cal-settings">
       <div style="margin-bottom:10px; font-weight:bold; font-size:13px; color:white;">Calendar Appearance</div>
-      <div class="set-row">
+      <!-- <div class="set-row">
         <span class="set-label">Opacity</span>
         <input type="range" id="set-opacity" min="0" max="1.0" step="0.05" value="0.2">
       </div>
       <div class="set-row">
         <span class="set-label">Tint Color</span>
         <input type="color" id="set-color" value="#000000">
-      </div>
+      </div> -->
       <button class="save-btn" onclick="toggleSettings()">Close</button>
     </div>
+
     <div id="event-modal-bg" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; -webkit-app-region: no-drag;"></div>
     <div id="event-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(30, 30, 30, 0.85); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; color: white; width: 350px; z-index: 1000; box-shadow: 0 4px 15px rgba(0,0,0,0.5); -webkit-app-region: no-drag;">
       <h3 style="margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px;">새 일정 추가</h3>
-      <input type="text" id="m-title" placeholder="제목 추가" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: none; border-radius: 4px;">
-      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; -webkit-app-region: no-drag;">
+      
+      <input type="text" id="m-title" class="modal-input" placeholder="제목 추가" style="width: 100%; margin-bottom: 10px;">
+      
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
         <input type="checkbox" id="m-allday" style="cursor: pointer; width: 16px; height: 16px;">
         <label for="m-allday" style="cursor: pointer;">종일</label>
       </div>
+      
       <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-        <input type="date" id="m-start-date" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
-        <input type="time" id="m-start-time" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+        <input type="date" id="m-start-date" class="modal-input" style="padding: 5px; flex: 1;">
+        <input type="time" id="m-start-time" class="modal-input" style="padding: 5px; flex: 1;">
       </div>
+      
       <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-        <input type="date" id="m-end-date" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
-        <input type="time" id="m-end-time" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+        <input type="date" id="m-end-date" class="modal-input" style="padding: 5px; flex: 1;">
+        <input type="time" id="m-end-time" class="modal-input" style="padding: 5px; flex: 1;">
       </div>
-      <input type="text" id="m-location" placeholder="장소 추가" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: none; border-radius: 4px;">
-      <textarea id="m-memo" placeholder="설명 및 메모" rows="3" style="width: 100%; padding: 8px; margin-bottom: 10px; background: #333; color: white; border: none; border-radius: 4px; resize: none;"></textarea>
+      
+      <input type="text" id="m-location" class="modal-input" placeholder="장소 추가" style="width: 100%; margin-bottom: 10px;">
+      <textarea id="m-memo" class="modal-input" placeholder="설명 및 메모" rows="3" style="width: 100%; margin-bottom: 10px; resize: none;"></textarea>
+      
       <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
-        <select id="m-alarm" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+        <select id="m-alarm" class="modal-input" style="padding: 5px; width: 48%;">
           <option value="none">알림 없음</option>
           <option value="10">10분 전</option>
-          <option value="30">30분 전</option>
+          <option value="30" selected>30분 전</option>
         </select>
-        <select id="m-repeat" style="background: #333; color: white; border: none; padding: 5px; border-radius: 4px;">
+        <select id="m-repeat" class="modal-input" style="padding: 5px; width: 48%;">
           <option value="none">반복 안함</option>
           <option value="DAILY">매일</option>
           <option value="WEEKLY">매주</option>
@@ -171,6 +181,7 @@
           <option value="YEARLY">매년</option>
         </select>
       </div>
+      
       <div style="display: flex; justify-content: flex-end; gap: 10px;">
         <button id="btn-cancel" style="padding: 8px 15px; cursor: pointer; background: #555; border: none; color: white; border-radius: 4px;">취소</button>
         <button id="btn-save" style="padding: 8px 15px; cursor: pointer; background: #0078D7; border: none; color: white; border-radius: 4px;">저장</button>
@@ -181,97 +192,75 @@
   <script>
     const { ipcRenderer } = require('electron');
 
-    // 1. 설정값 관리
-    const defaultConf = { opacity: 0.6, color: '#000000' };
+    // ==========================================
+    // 1. 전역 변수 및 상태 관리
+    // ==========================================
+    let calendar;
+    let pendingEventData = null;
+    let isPinned = false;
+    
+    // 설정값 관리
+    const defaultConf = { opacity: 0, color: '#00ffffff' };
     let conf = JSON.parse(localStorage.getItem('calendarConfig')) || defaultConf;
-    
-    const appContainer = document.getElementById('app-container');
-    const opacityInput = document.getElementById('set-opacity');
-    const colorInput = document.getElementById('set-color');
-    const settingsPanel = document.getElementById('cal-settings');
-
-    // 팝업창 내용 초기화 함수
-    function clearEventModal() {
-      document.getElementById('m-title').value = '';       // 제목 비우기
-      document.getElementById('m-location').value = '';    // 장소 비우기
-      document.getElementById('m-memo').value = '';        // 메모 비우기
-      document.getElementById('m-alarm').value = '30';     // 알림 기본값(30분 전)으로 되돌리기
-      document.getElementById('m-repeat').value = 'none';  // 반복 기본값(반복 안함)으로 되돌리기
-    }
-
-    function applyStyles() {
-      // 16진수 컬러 -> RGBA 변환
-      const hex = conf.color;
-      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-      appContainer.style.background = `rgba(${r}, ${g}, ${b}, ${conf.opacity})`;
-      
-      opacityInput.value = conf.opacity;
-      colorInput.value = conf.color;
-    }
-    
-    // 설정 변경 이벤트
-    opacityInput.addEventListener('input', (e) => { conf.opacity = e.target.value; applyStyles(); localStorage.setItem('calendarConfig', JSON.stringify(conf)); });
-    colorInput.addEventListener('input', (e) => { conf.color = e.target.value; applyStyles(); localStorage.setItem('calendarConfig', JSON.stringify(conf)); });
 
     function toggleSettings() {
-      if(settingsPanel.style.display === 'block') settingsPanel.style.display = 'none';
-      else settingsPanel.style.display = 'block';
+      const settingsPanel = document.getElementById('cal-settings');
+      settingsPanel.style.display = (settingsPanel.style.display === 'block') ? 'none' : 'block';
     }
 
-    // 2. 버튼 이벤트
-    document.getElementById('btn-settings').addEventListener('click', toggleSettings);
-    
-    let isPinned = false;
-    const btnPin = document.getElementById('btn-pin');
-    btnPin.addEventListener('click', () => {
-      isPinned = !isPinned;
-      btnPin.classList.toggle('active', isPinned);
-      ipcRenderer.send('toggle-pin', isPinned);
-    });
+    function clearEventModal() {
+      document.getElementById('m-title').value = '';       
+      document.getElementById('m-location').value = '';    
+      document.getElementById('m-memo').value = '';        
+      document.getElementById('m-alarm').value = '30';     
+      document.getElementById('m-repeat').value = 'none';  
+      document.getElementById('m-allday').checked = false;
+      document.getElementById('m-start-time').style.display = 'inline-block';
+      document.getElementById('m-end-time').style.display = 'inline-block';
+    }
 
-    document.getElementById('btn-min').addEventListener('click', () => ipcRenderer.send('minimize-window'));
-    document.getElementById('btn-close').addEventListener('click', () => ipcRenderer.send('close-window'));
-
-    // 3. 달력 초기화
-  document.addEventListener('DOMContentLoaded', function() {
-    applyStyles(); 
-
-    var calendarEl = document.getElementById('calendar');
-    var calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'dayGridMonth',
-      height: '100%',
-      headerToolbar: { left: 'prev,next today', center: 'title', right: '' },
+    let lastSyncTime = 0; // 마지막으로 동기화한 시간을 기억할 변수
+    function autoSync() {
+      const now = Date.now();
+      // 🔥 마지막 동기화 이후 1분(60000ms)이 지나지 않았다면 새로고침 무시!
+      if (now - lastSyncTime < 60000) {
+        return; 
+      }
       
-      // 🔥 [수정] 날짜 클릭 이벤트
-      dateClick: function(info) {
-        console.log('Clicked:', info.dateStr);
+      lastSyncTime = now;
+      console.log('자동 동기화 요청...');
+      
+      // ❌ 여기서 calendar.removeAllEvents(); 를 미리 하지 않습니다! (깜빡임의 주범)
+      ipcRenderer.send('load-initial-events'); 
+    }
 
-        // 1. 기존에 선택된 날짜의 클래스 제거 (초기화)
-        const prevSelected = document.querySelectorAll('.fc-day-selected');
-        prevSelected.forEach(el => el.classList.remove('fc-day-selected'));
+    // 5분마다 자동 실행 및 창 포커스 시 실행 (기존 코드 유지)
+    setInterval(autoSync, 300000); 
+    window.addEventListener('focus', autoSync);
 
-        // 2. 지금 클릭한 날짜(td 요소)에 클래스 추가
-        // (info.dayEl이 클릭된 날짜의 HTML 요소입니다)
-        info.dayEl.classList.add('fc-day-selected');
-
-        // 3. 메인 프로세스로 날짜 전송
-        ipcRenderer.send('date-clicked', info.dateStr);
-      },
-      selectable: true, // 드래그 선택 허용
-      selectMirror: true, // 드래그 중일 때 임시 이벤트 보여주기
-
-      // 날짜를 드래그하거나 클릭했을 때 실행되는 함수!
-      select: function(info) {
+    // ==========================================
+    // 3. 앱 초기화 (DOM 로드 완료 시점)
+    // ==========================================
+    document.addEventListener('DOMContentLoaded', function() {
+      
+      // 달력 초기화
+      const calendarEl = document.getElementById('calendar');
+      calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        selectable: true, 
+        selectMirror: true,
+        locale: 'ko', 
+        
+        select: function(info) {
           document.getElementById('event-modal-bg').style.display = 'block';
           document.getElementById('event-modal').style.display = 'block';
-
+          
           document.getElementById('m-start-date').value = info.startStr.split('T')[0];
 
-          // 🔥 달력에서 하루만 클릭했을 때 화면에 다음날이 찍히는 것 방지
           let endStr = info.endStr.split('T')[0];
           if (info.allDay) {
             let endDateObj = new Date(endStr);
-            endDateObj.setDate(endDateObj.getDate() - 1); // 화면 표시용으로 하루를 뺌
+            endDateObj.setDate(endDateObj.getDate() - 1); 
             
             let year = endDateObj.getFullYear();
             let month = String(endDateObj.getMonth() + 1).padStart(2, '0');
@@ -280,43 +269,51 @@
           }
           document.getElementById('m-end-date').value = endStr;
           
-          // 기본 시간 세팅
           document.getElementById('m-start-time').value = "12:00"; 
           document.getElementById('m-end-time').value = "13:00";
 
-          // 드래그한 영역에 따라 종일 스위치 상태 자동 조절
           const alldayCheckbox = document.getElementById('m-allday');
           alldayCheckbox.checked = info.allDay;
-          alldayCheckbox.dispatchEvent(new Event('change')); // 이벤트 강제 발생시켜 시간칸 숨기기
+          alldayCheckbox.dispatchEvent(new Event('change'));
         }
-    });
-    
-    // 1. 종일 체크박스 클릭 이벤트 (체크하면 시간 입력칸 숨기기)
-    document.getElementById('m-allday').addEventListener('change', (e) => {
-      const isAllDay = e.target.checked;
-      document.getElementById('m-start-time').style.display = isAllDay ? 'none' : 'inline-block';
-      document.getElementById('m-end-time').style.display = isAllDay ? 'none' : 'inline-block';
-    });
-    // 취소 버튼 누르면 창 닫기
-    document.getElementById('btn-cancel').addEventListener('click', () => {
-      document.getElementById('event-modal-bg').style.display = 'none';
-      document.getElementById('event-modal').style.display = 'none';
-      calendar.unselect();
+      });
+      calendar.render();
+
+      // 최초 실행 시 구글 일정 불러오기
+      ipcRenderer.send('load-initial-events'); 
+
+      // 타이틀바 제어 버튼 이벤트
+      document.getElementById('btn-settings').addEventListener('click', toggleSettings);
+      document.getElementById('btn-min').addEventListener('click', () => ipcRenderer.send('minimize-window'));
+      document.getElementById('btn-close').addEventListener('click', () => ipcRenderer.send('close-window'));
       
-      clearEventModal(); // 🔥 창 닫고 나서 내용 싹 비우기!
-    });
+      const btnPin = document.getElementById('btn-pin');
+      btnPin.addEventListener('click', () => {
+        isPinned = !isPinned;
+        btnPin.classList.toggle('active', isPinned);
+        ipcRenderer.send('toggle-pin', isPinned);
+      });
 
-    // 저장 버튼 누르면 데이터 묶어서 main.js로 보내기
-    document.getElementById('btn-save').addEventListener('click', () => {
-      const isAllDay = document.getElementById('m-allday').checked; // 체크 여부 확인
-      const startDate = document.getElementById('m-start-date').value;
-      const startTime = document.getElementById('m-start-time').value;
-      const endDate = document.getElementById('m-end-date').value;
-      const endTime = document.getElementById('m-end-time').value;
+      // 모달창 내부 이벤트
+      document.getElementById('m-allday').addEventListener('change', (e) => {
+        const isAllDay = e.target.checked;
+        document.getElementById('m-start-time').style.display = isAllDay ? 'none' : 'inline-block';
+        document.getElementById('m-end-time').style.display = isAllDay ? 'none' : 'inline-block';
+      });
 
-      const myEventData = {
+      document.getElementById('btn-cancel').addEventListener('click', () => {
+        document.getElementById('event-modal-bg').style.display = 'none';
+        document.getElementById('event-modal').style.display = 'none';
+        calendar.unselect();
+        clearEventModal();
+      });
+
+      document.getElementById('btn-save').addEventListener('click', () => {
+        const isAllDay = document.getElementById('m-allday').checked;
+        
+        const myEventData = {
           title: document.getElementById('m-title').value || '(제목 없음)',
-          isAllDay: isAllDay, // 🔥 종일 여부 추가
+          isAllDay: isAllDay,
           startDate: document.getElementById('m-start-date').value,
           startTime: document.getElementById('m-start-time').value,
           endDate: document.getElementById('m-end-date').value,
@@ -327,53 +324,80 @@
           repeat: document.getElementById('m-repeat').value
         };
 
-      // 팝업 닫고 전송
-      ipcRenderer.send('add-google-event', myEventData);
+        pendingEventData = myEventData; 
+        ipcRenderer.send('add-google-event', myEventData);
 
-      document.getElementById('event-modal-bg').style.display = 'none';
-      document.getElementById('event-modal').style.display = 'none';
-      calendar.unselect();
-      
-      clearEventModal(); // 🔥 저장(전송) 완료 후 창 내용 싹 비우기!
+        document.getElementById('event-modal-bg').style.display = 'none';
+        document.getElementById('event-modal').style.display = 'none';
+        calendar.unselect();
+        clearEventModal();
+      });
+
+      // 자동 동기화 트리거
+      setInterval(autoSync, 300000); 
+      window.addEventListener('focus', autoSync);
     });
 
-    document.getElementById('btn-sync-google').addEventListener('click', () => {
-        // 메인 프로세스에 요청
-        ipcRenderer.send('get-google-events');
-    });
-
-    // 2. 데이터 받아서 달력에 뿌리기
-    ipcRenderer.on('google-events-reply', (event, events) => {
-        console.log("구글 일정 도착:", events);
-        
-        // FullCalendar에 일정 추가
-        var calendarEl = document.getElementById('calendar');
-        // (이미 생성된 calendar 객체에 접근해야 함. calendar 변수를 전역으로 빼거나 여기서 addEvent 사용)
-        
-        events.forEach(evt => {
-            // 기존 FullCalendar 객체에 이벤트 추가
-            calendar.addEvent({
-                title: evt.title,
-                start: evt.start,
-                color: evt.color
-            });
-        });
-        
-        alert('구글 캘린더 연동 성공! ' + events.length + '개의 일정을 가져왔습니다.');
-    });
-
-    // main.js에서 추가가 끝난 후 보내는 결과 받기
+    // ==========================================
+    // 4. IPC 통신 (메인 프로세스로부터의 응답 처리)
+    // ==========================================
+    
+    // 새 일정 등록 결과 처리
     ipcRenderer.on('add-google-event-reply', (event, result) => {
-      if (result.success) {
-        alert('구글 캘린더에 일정이 성공적으로 추가되었습니다!\n웹에서 확인해보세요.');
-        console.log('구글 캘린더 링크:', result.link);
-      } else {
-        alert('일정 추가 실패: ' + result.error);
+      if (result.success && pendingEventData) {
+        let eventStart, eventEnd;
+
+        if (pendingEventData.isAllDay) {
+          eventStart = pendingEventData.startDate;
+          let endObj = new Date(pendingEventData.endDate);
+          endObj.setDate(endObj.getDate() + 1);
+          eventEnd = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, '0')}-${String(endObj.getDate()).padStart(2, '0')}`;
+        } else {
+          eventStart = `${pendingEventData.startDate}T${pendingEventData.startTime}:00`;
+          eventEnd = `${pendingEventData.endDate}T${pendingEventData.endTime}:00`;
+        }
+
+        calendar.addEvent({
+          title: pendingEventData.title,
+          start: eventStart,
+          end: eventEnd,
+          allDay: pendingEventData.isAllDay
+        });
+
+        pendingEventData = null; 
+      } else if (!result.success) {
+        alert('저장 실패: ' + result.error);
+        pendingEventData = null;
       }
     });
-    
-    calendar.render();
-  });
+
+    ipcRenderer.on('load-initial-events-reply', (event, result) => {
+      if (result.success) {
+        // 🔥 새 데이터가 무사히 도착했으니, 이제 기존 일정을 싹 지웁니다!
+        calendar.removeAllEvents();
+
+        const googleEvents = result.events;
+        
+        googleEvents.forEach(item => {
+          if (item.status === 'cancelled') return;
+
+          let start = item.start.dateTime || item.start.date;
+          let end = item.end.dateTime || item.end.date;
+          let isAllDay = item.start.date ? true : false; 
+
+          calendar.addEvent({
+            id: item.id, 
+            title: item.summary || '(제목 없음)',
+            start: start,
+            end: end,
+            allDay: isAllDay
+          });
+        });
+      } else {
+        console.error('초기 일정 불러오기 에러:', result.error);
+      }
+    });
+
   </script>
 </body>
 </html>
