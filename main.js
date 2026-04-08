@@ -3,161 +3,153 @@ const path = require('path');
 const { google } = require('googleapis');
 const fs = require('fs').promises;
 
-app.setAppUserModelId('com.shinetic.workerflow'); 
+app.setAppUserModelId('com.shinetic.workerflow');
 
-// 하드웨어 가속 끄기 (화면 깨짐 및 좌표 오류 방지 - 필요 시 주석 해제)
-//app.disableHardwareAcceleration();
-
-// ========================================================
-// 1. 전역 변수 및 상수 설정
-// ========================================================
-
-// 윈도우 및 시스템 트레이 변수
-let dayBarWin = null;   // 하루 바 (메인 위젯)
-let calendarWin = null; // 달력 뷰 (팝업 창)
+// ============================================================
+// 1. 전역 변수
+// ============================================================
+let dayBarWin = null;
+let calendarWin = null;
 let tray = null;
-let isQuitting = false; // 트레이에서 완전 종료 시 true
-
-// 위젯 위치/크기 상태 저장 (기본값)
+let isQuitting = false;
 let lastBounds = { position: 'bottom', size: 120 };
 
-// 구글 캘린더 API 설정
+// 마지막으로 로드한 Google 이벤트 캐시 (날짜 클릭 시 재사용)
+let cachedGoogleEvents = [];
+
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
-const TOKEN_PATH = path.join(__dirname, 'token.json');           // 발급된 토큰 저장 경로
-const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json'); // 구글 클라우드에서 받은 키 파일 경로
+const TOKEN_PATH = path.join(__dirname, 'token.json');
+const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 
 
-// ========================================================
-// 2. 윈도우 및 트레이 생성 함수
-// ========================================================
-
-// (1) 하루 바 (Day Bar) 생성
+// ============================================================
+// 2. 윈도우 생성
+// ============================================================
 function createDayBarWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
-  
+
   dayBarWin = new BrowserWindow({
-    width: width, 
+    width,
     height: 120,
-    frame: false, 
+    frame: false,
     transparent: false,
     backgroundColor: '#00000000',
-    //backgroundMaterial: 'acrylic', 
-    backgroundMaterial: 'mica', 
+    backgroundMaterial: 'mica',
     show: false,
     alwaysOnTop: false,
-    skipTaskbar: false,
+    //skipTaskbar: true,
     hasShadow: false,
     icon: path.join(__dirname, 'logo.png'),
     webPreferences: { 
-      nodeIntegration: true, 
-      contextIsolation: false 
+      nodeIntegration: false,       // 🔥 보안: 직접 접근 차단
+      contextIsolation: true,       // 🔥 보안: 격리 모드 켜기
+      preload: path.join(__dirname, 'preload.js') // 🔥 검문소 연결
     }
+    //webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
 
   dayBarWin.loadFile('index.html');
-  updateBounds(false); // 위치 초기화 (하단 배치)
-  applyAcrylicFix(dayBarWin);
-  
-  dayBarWin.once('ready-to-show', () => {
-    dayBarWin.show();
-  });
+  updateBounds(false);
+  applyMaterialFix(dayBarWin);
 
-  // 닫기 버튼(X)을 눌렀을 때 앱 종료 대신 숨기기
+  dayBarWin.once('ready-to-show', () => dayBarWin.show());
+
   dayBarWin.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
       dayBarWin.hide();
-      return false;
     }
   });
 
-  dayBarWin.on('closed', () => dayBarWin = null);
+  dayBarWin.on('closed', () => { dayBarWin = null; });
 }
 
-// (2) 달력 뷰 (Calendar View) 생성
 function createCalendarWindow() {
   if (calendarWin) return;
 
   calendarWin = new BrowserWindow({
-    width: 900, height: 700,
-    frame: false,            
+    width: 900,
+    height: 700,
+    frame: false,
     skipTaskbar: true,
     transparent: false,
     backgroundColor: '#00000000',
     backgroundMaterial: 'mica',
     show: false,
-    hasShadow: false,        
+    hasShadow: false,
     icon: path.join(__dirname, 'logo.png'),
     webPreferences: { 
-      nodeIntegration: true, 
-      contextIsolation: false 
+      nodeIntegration: false,       // 🔥 보안: 직접 접근 차단
+      contextIsolation: true,       // 🔥 보안: 격리 모드 켜기
+      preload: path.join(__dirname, 'preload.js') // 🔥 검문소 연결
     }
+    //webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
 
   calendarWin.loadFile('calendar.html');
-  applyAcrylicFix(calendarWin);
+  applyMaterialFix(calendarWin);
 
-  calendarWin.once('ready-to-show', () => {
-    calendarWin.show();
-  });
-
-  calendarWin.on('closed', () => calendarWin = null);
+  calendarWin.once('ready-to-show', () => calendarWin.show());
+  calendarWin.on('closed', () => { calendarWin = null; });
 }
 
-// (3) 아크릴 효과 렌더링 버그 픽스 (창 크기를 미세하게 조절)
-function applyAcrylicFix(win) {
+// Mica/Acrylic 렌더링 버그 픽스 (창 크기 미세 조절)
+function applyMaterialFix(win) {
   if (!win) return;
   win.once('show', () => {
     setTimeout(() => {
-      const [width, height] = win.getSize();
-      win.setSize(width, height + 1);
-      win.setSize(width, height);
+      const [w, h] = win.getSize();
+      win.setSize(w, h + 1);
+      win.setSize(w, h);
     }, 100);
   });
 }
 
-// (4) 하루 바 위치 및 크기 계산
+// 데이바 위치/크기 계산 및 적용
 function updateBounds(isExpanded) {
   if (!dayBarWin) return;
 
   const display = screen.getPrimaryDisplay();
   const { width: scrW, height: scrH } = display.workAreaSize;
   const { x: offX, y: offY } = display.workArea;
-
   const { position, size } = lastBounds;
   const widgetSize = Math.max(85, size || 120);
-  const expandSize = 500; 
+  const expandSize = 500;
 
   let x, y, w, h;
-
   switch (position) {
-    case 'top': 
+    case 'top':
       x = offX; y = offY; w = scrW; h = isExpanded ? expandSize : widgetSize; break;
-    case 'left': 
+    case 'left':
       x = offX; y = offY; w = isExpanded ? expandSize : widgetSize; h = scrH; break;
-    case 'right': 
-      w = isExpanded ? expandSize : widgetSize; h = scrH; x = isExpanded ? (offX + scrW - expandSize) : (offX + scrW - widgetSize); y = offY; break;
-    case 'bottom': 
-    default: 
-      w = scrW; h = isExpanded ? expandSize : widgetSize; x = offX; y = isExpanded ? (offY + scrH - expandSize) : (offY + scrH - widgetSize); break;
+    case 'right':
+      w = isExpanded ? expandSize : widgetSize; h = scrH;
+      x = offX + scrW - w; y = offY; break;
+    case 'bottom':
+    default:
+      w = scrW; h = isExpanded ? expandSize : widgetSize;
+      x = offX; y = offY + scrH - h; break;
   }
-  
+
   dayBarWin.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) });
 }
 
-// (5) 시스템 트레이 (작업 표시줄 아이콘) 생성
+
+// ============================================================
+// 3. 시스템 트레이
+// ============================================================
 function createSystemTray(lang = 'en') {
   if (tray) tray.destroy();
 
-  const iconPath = app.isPackaged 
-    ? path.join(process.resourcesPath, 'icon.ico') 
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.ico')
     : path.join(__dirname, 'icon.ico');
 
   let trayIcon;
   try {
     trayIcon = nativeImage.createFromPath(iconPath);
   } catch (e) {
-    console.error("Tray icon error:", e);
+    console.error('Tray icon error:', e);
     return;
   }
 
@@ -165,22 +157,22 @@ function createSystemTray(lang = 'en') {
   tray.setToolTip('WorkerFlow');
 
   const labels = {
-    en: { open: 'Open', quit: 'Quit' },
-    ko: { open: '열기', quit: '종료' },
-    ja: { open: '開く', quit: '終了' },
-    zh: { open: '打开', quit: '退出' },
-    es: { open: 'Abrir', quit: 'Salir' }
+    en: { open: 'Open', calendar: 'Calendar', quit: 'Quit' },
+    ko: { open: '열기', calendar: '달력', quit: '종료' },
+    ja: { open: '開く', calendar: 'カレンダー', quit: '終了' },
+    zh: { open: '打开', calendar: '日历', quit: '退出' },
+    es: { open: 'Abrir', calendar: 'Calendario', quit: 'Salir' }
   };
   const t = labels[lang] || labels.en;
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: t.open, click: () => dayBarWin && dayBarWin.show() },
+    { label: t.open,     click: () => dayBarWin  && dayBarWin.show()  },
+    { label: t.calendar, click: () => { if (calendarWin) calendarWin.show(); else createCalendarWindow(); } },
     { type: 'separator' },
-    { label: t.quit, click: () => { isQuitting = true; app.quit(); } }
+    { label: t.quit,     click: () => { isQuitting = true; app.quit(); } }
   ]);
 
   tray.setContextMenu(contextMenu);
-
   tray.on('click', () => {
     if (dayBarWin) {
       if (dayBarWin.isVisible()) dayBarWin.hide();
@@ -190,16 +182,20 @@ function createSystemTray(lang = 'en') {
 }
 
 
-// ========================================================
-// 3. 구글 캘린더 OAuth 2.0 인증 로직
-// ========================================================
-
-async function loadSavedCredentialsIfExist() {
+// ============================================================
+// 4. Google OAuth 인증
+// ============================================================
+async function loadSavedCredentials() {
   try {
     const content = await fs.readFile(TOKEN_PATH);
     const credentials = JSON.parse(content);
-    return google.auth.fromJSON(credentials);
-  } catch (err) {
+    const client = google.auth.fromJSON(credentials);
+    // 토큰 자동 갱신 연결
+    client.on('tokens', (tokens) => {
+      if (tokens.refresh_token) saveCredentials(client);
+    });
+    return client;
+  } catch {
     return null;
   }
 }
@@ -208,13 +204,12 @@ async function saveCredentials(client) {
   const content = await fs.readFile(CREDENTIALS_PATH);
   const keys = JSON.parse(content);
   const key = keys.installed || keys.web;
-  const payload = JSON.stringify({
+  await fs.writeFile(TOKEN_PATH, JSON.stringify({
     type: 'authorized_user',
     client_id: key.client_id,
     client_secret: key.client_secret,
     refresh_token: client.credentials.refresh_token,
-  });
-  await fs.writeFile(TOKEN_PATH, payload);
+  }));
 }
 
 function signInWithPopup() {
@@ -222,255 +217,204 @@ function signInWithPopup() {
     const content = await fs.readFile(CREDENTIALS_PATH);
     const keys = JSON.parse(content);
     const key = keys.installed || keys.web;
-    const redirectUri = key.redirect_uris[0]; 
+    const redirectUri = key.redirect_uris[0];
 
-    const oauth2Client = new google.auth.OAuth2(
-      key.client_id, key.client_secret, redirectUri
-    );
+    const oauth2Client = new google.auth.OAuth2(key.client_id, key.client_secret, redirectUri);
+    const authUrl = oauth2Client.generateAuthUrl({ access_type: 'offline', scope: SCOPES });
 
-    const authUrl = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: SCOPES,
-    });
-
-    // 로그인용 미니 팝업창 띄우기
     const authWindow = new BrowserWindow({
       width: 500, height: 600,
       show: false, alwaysOnTop: true,
-      title: 'Google 계정으로 로그인',
+      title: 'Google 로그인',
       webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
-
     authWindow.loadURL(authUrl);
     authWindow.show();
 
-    const handleNavigation = async (url) => {
-      if (url.startsWith(redirectUri)) {
-        const urlObj = new URL(url);
-        const code = urlObj.searchParams.get('code');
-        const error = urlObj.searchParams.get('error');
-
-        if (code) {
-          try {
-            const { tokens } = await oauth2Client.getToken(code);
-            oauth2Client.setCredentials(tokens);
-            await saveCredentials(oauth2Client); 
-            resolve(oauth2Client);
-          } catch (err) {
-            reject(err);
-          }
-        } else if (error) {
-          reject(new Error(error));
-        }
-        authWindow.close(); 
+    const handleNav = async (url) => {
+      if (!url.startsWith(redirectUri)) return;
+      const params = new URL(url).searchParams;
+      const code = params.get('code');
+      const error = params.get('error');
+      authWindow.close();
+      if (code) {
+        try {
+          const { tokens } = await oauth2Client.getToken(code);
+          oauth2Client.setCredentials(tokens);
+          await saveCredentials(oauth2Client);
+          resolve(oauth2Client);
+        } catch (err) { reject(err); }
+      } else {
+        reject(new Error(error || '인증 실패'));
       }
     };
 
-    authWindow.webContents.on('will-redirect', (event, url) => handleNavigation(url));
-    authWindow.webContents.on('will-navigate', (event, url) => handleNavigation(url));
+    authWindow.webContents.on('will-redirect', (_, url) => handleNav(url));
+    authWindow.webContents.on('will-navigate',  (_, url) => handleNav(url));
     authWindow.on('closed', () => reject(new Error('로그인 창이 닫혔습니다.')));
   });
 }
 
-// 메인 인증 함수
 async function authorize() {
-  let client = await loadSavedCredentialsIfExist();
+  const client = await loadSavedCredentials();
   if (client) return client;
-  return await signInWithPopup();
+  return signInWithPopup();
 }
 
 
-// ========================================================
-// 4. IPC 통신 핸들러 (렌더러 <-> 메인)
-// ========================================================
-
-// --- UI 및 상태 제어 ---
+// ============================================================
+// 5. IPC 핸들러 — UI 제어
+// ============================================================
 ipcMain.on('toggle-pin', (event, isPinned) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.setAlwaysOnTop(isPinned);
+  BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(isPinned);
 });
 
 ipcMain.on('minimize-window', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.minimize();
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
 });
 
 ipcMain.on('close-window', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.close(); 
+  BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-ipcMain.on('date-clicked', (event, dateStr) => {
-  if (dayBarWin) dayBarWin.webContents.send('change-date', dateStr);
+ipcMain.on('open-calendar', () => {
+  if (calendarWin) calendarWin.show();
+  else createCalendarWindow();
 });
 
-ipcMain.on('update-widget-bounds', (e, b) => { 
-  lastBounds = b; updateBounds(false); 
+ipcMain.on('update-widget-bounds', (_, b) => { lastBounds = b; updateBounds(false); });
+ipcMain.on('set-expand-mode',      (_, ex) => { updateBounds(ex); });
+ipcMain.on('change-language',      (_, lang) => { createSystemTray(lang); });
+ipcMain.on('force-quit',           () => { isQuitting = true; app.quit(); });
+
+ipcMain.on('set-auto-start', (_, isEnabled) => {
+  if (!app.isPackaged) return;
+  app.setLoginItemSettings({ openAtLogin: isEnabled, path: app.getPath('exe') });
 });
 
-ipcMain.on('set-expand-mode', (e, ex) => { updateBounds(ex); });
-ipcMain.on('change-language', (event, lang) => { createSystemTray(lang); });
-ipcMain.on('force-quit', () => { isQuitting = true; app.quit(); });
+// 달력에서 날짜 클릭 → 해당 날짜의 Google 일정만 필터해서 데이바로 전달
+ipcMain.on('date-clicked', (_, dateStr) => {
+  if (!dayBarWin) return;
 
-ipcMain.on('set-auto-start', (event, isEnabled) => {
-  if (!app.isPackaged) return; 
-  app.setLoginItemSettings({
-    openAtLogin: isEnabled,
-    path: app.getPath('exe')
+  // 캐시에서 해당 날짜 일정 필터
+  const dayEvents = cachedGoogleEvents.filter(item => {
+    if (item.status === 'cancelled') return false;
+    
+    const startStr = item.start.date || item.start.dateTime?.slice(0, 10);
+    const endStr   = item.end.date   || item.end.dateTime?.slice(0, 10);
+    
+    if (!startStr) return false;
+
+    // 🔥 종일 일정은 종료일이 다음 날 0시로 잡히므로 '<' 기호로 비교
+    if (item.start.date) {
+      return startStr <= dateStr && dateStr < endStr;
+    } 
+    // 🔥 시간 지정 일정은 시작/종료일이 같은 날이므로 '<=' 기호로 비교
+    else {
+      return startStr <= dateStr && dateStr <= endStr;
+    }
   });
+
+  dayBarWin.webContents.send('change-date', { dateStr, googleEvents: dayEvents });
 });
 
 
-// --- 구글 캘린더 데이터 제어 ---
+// ============================================================
+// 6. IPC 핸들러 — Google Calendar CRUD
+// ============================================================
 
-// 1. 초기 일정 불러오기 (최근 1개월 ~ 6개월)
+// 공통: 이벤트 리소스 조립
+function buildEventResource(eventData) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const reminderSettings = { useDefault: false, overrides: [] };
+  if (eventData.alarmMinutes !== 'none') {
+    reminderSettings.overrides.push({ method: 'popup', minutes: parseInt(eventData.alarmMinutes, 10) });
+  }
+
+  let start, end;
+  if (eventData.isAllDay) {
+    const endObj = new Date(eventData.endDate);
+    endObj.setDate(endObj.getDate() + 1);
+    const pad = (n) => String(n).padStart(2, '0');
+    const googleEnd = `${endObj.getFullYear()}-${pad(endObj.getMonth() + 1)}-${pad(endObj.getDate())}`;
+    start = { date: eventData.startDate };
+    end   = { date: googleEnd };
+  } else {
+    start = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone };
+    end   = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone };
+  }
+
+  const resource = {
+    summary:     eventData.title,
+    location:    eventData.location,
+    description: eventData.memo,
+    start,
+    end,
+    reminders: reminderSettings,
+  };
+
+  if (eventData.colorId) resource.colorId = eventData.colorId;
+  if (eventData.repeat !== 'none') {
+    resource.recurrence = [`RRULE:FREQ=${eventData.repeat}`];
+  }
+
+  return resource;
+}
+
+// 일정 목록 불러오기 (최근 1개월 ~ 6개월)
 ipcMain.on('load-initial-events', async (event) => {
   try {
     const auth = await authorize();
-    const calendar = google.calendar({ version: 'v3', auth });
+    const cal = google.calendar({ version: 'v3', auth });
 
     const timeMin = new Date(); timeMin.setMonth(timeMin.getMonth() - 1);
     const timeMax = new Date(); timeMax.setMonth(timeMax.getMonth() + 6);
 
-    const res = await calendar.events.list({
+    const res = await cal.events.list({
       calendarId: 'primary',
       timeMin: timeMin.toISOString(),
       timeMax: timeMax.toISOString(),
-      maxResults: 250, 
-      singleEvents: true, 
+      maxResults: 250,
+      singleEvents: true,
       orderBy: 'startTime',
     });
 
-    event.reply('load-initial-events-reply', { success: true, events: res.data.items });
+    cachedGoogleEvents = res.data.items || [];
+    event.reply('load-initial-events-reply', { success: true, events: cachedGoogleEvents });
   } catch (err) {
-    console.error('구글 일정 불러오기 실패:', err);
+    console.error('일정 불러오기 실패:', err);
     event.reply('load-initial-events-reply', { success: false, error: err.message });
   }
 });
 
-// 2. 새 일정 등록하기
+// 일정 등록
 ipcMain.on('add-google-event', async (event, eventData) => {
   try {
-    const auth = await authorize(); 
-    const calendar = google.calendar({ version: 'v3', auth });
-
-    // 알림 설정
-    const reminderSettings = { useDefault: false, overrides: [] };
-    if (eventData.alarmMinutes !== 'none') {
-      reminderSettings.overrides.push({ method: 'popup', minutes: parseInt(eventData.alarmMinutes, 10) });
-    }
-
-    // 시간 설정 (종일 vs 특정 시간)
-    let startSettings, endSettings;
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    if (eventData.isAllDay) {
-      const endObj = new Date(eventData.endDate);
-      endObj.setDate(endObj.getDate() + 1);
-      const googleEndDate = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, '0')}-${String(endObj.getDate()).padStart(2, '0')}`;
-
-      startSettings = { date: eventData.startDate };
-      endSettings = { date: googleEndDate };
-    } else {
-      startSettings = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone };
-      endSettings = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone };
-    }
-
-    // 일정 조립
-    const newEvent = {
-      summary: eventData.title,
-      location: eventData.location,       
-      description: eventData.memo,        
-      start: startSettings, 
-      end: endSettings,     
-      reminders: reminderSettings,
-    };
-
-    // 🔥 색상이 선택되었을 때만 colorId 추가
-    if (eventData.colorId && eventData.colorId !== '') {
-      newEvent.colorId = eventData.colorId;
-    }
-
-    // 반복 설정
-    if (eventData.repeat !== 'none') {
-      newEvent.recurrence = [`RRULE:FREQ=${eventData.repeat}`]; 
-    }
-
-    // 전송
-    const response = await calendar.events.insert({
+    const auth = await authorize();
+    const cal = google.calendar({ version: 'v3', auth });
+    const response = await cal.events.insert({
       calendarId: 'primary',
-      resource: newEvent,
+      resource: buildEventResource(eventData),
     });
-
     event.reply('add-google-event-reply', { success: true, link: response.data.htmlLink });
-
   } catch (err) {
-    console.error('구글 캘린더 일정 등록 실패:', err);
+    console.error('일정 등록 실패:', err);
     event.reply('add-google-event-reply', { success: false, error: err.message });
   }
 });
 
+// 일정 수정
 ipcMain.on('update-google-event', async (event, { eventId, eventData }) => {
   try {
     const auth = await authorize();
-    const calendar = google.calendar({ version: 'v3', auth });
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-    // 1. 알림 설정 (구글 규격에 맞게 조립)
-    const reminderSettings = { useDefault: false, overrides: [] };
-    if (eventData.alarmMinutes !== 'none') {
-      reminderSettings.overrides.push({ 
-        method: 'popup', 
-        minutes: parseInt(eventData.alarmMinutes, 10) 
-      });
-    }
-
-    // 2. 시간 및 날짜 설정
-    let startSettings, endSettings;
-    if (eventData.isAllDay) {
-      const endObj = new Date(eventData.endDate);
-      endObj.setDate(endObj.getDate() + 1);
-      const googleEndDate = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, '0')}-${String(endObj.getDate()).padStart(2, '0')}`;
-      startSettings = { date: eventData.startDate };
-      endSettings = { date: googleEndDate };
-    } else {
-      startSettings = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone };
-      endSettings = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone };
-    }
-
-    // 3. 리소스 조립
-    const resource = {
-      summary: eventData.title,
-      location: eventData.location,
-      description: eventData.memo,
-      start: startSettings,
-      end: endSettings,
-      reminders: reminderSettings, // 🔥 알림 정보 추가
-    };
-
-    // 4. 반복 설정 (RRULE 형식)
-    if (eventData.repeat !== 'none') {
-      resource.recurrence = [`RRULE:FREQ=${eventData.repeat}`];
-    } else {
-      resource.recurrence = null; // 반복 안 함일 경우 명시적으로 제거
-    }
-
-    // 5. 색상 설정
-    if (eventData.colorId && eventData.colorId !== '') {
-      resource.colorId = eventData.colorId;
-    } else {
-      resource.colorId = null;
-    }
-
-    await calendar.events.update({
-      calendarId: 'primary',
-      eventId: eventId,
-      resource: resource
-    });
-
+    const cal = google.calendar({ version: 'v3', auth });
+    const resource = buildEventResource(eventData);
+    // 반복 없음으로 변경 시 명시적 제거
+    if (eventData.repeat === 'none') resource.recurrence = null;
+    await cal.events.update({ calendarId: 'primary', eventId, resource });
     event.reply('update-google-event-reply', { success: true });
   } catch (err) {
-    console.error('수정 실패:', err);
+    console.error('일정 수정 실패:', err);
     event.reply('update-google-event-reply', { success: false, error: err.message });
   }
 });
@@ -479,34 +423,26 @@ ipcMain.on('update-google-event', async (event, { eventId, eventData }) => {
 ipcMain.on('delete-google-event', async (event, eventId) => {
   try {
     const auth = await authorize();
-    const calendar = google.calendar({ version: 'v3', auth });
-    await calendar.events.delete({ calendarId: 'primary', eventId });
+    const cal = google.calendar({ version: 'v3', auth });
+    await cal.events.delete({ calendarId: 'primary', eventId });
     event.reply('delete-google-event-reply', { success: true });
   } catch (err) {
+    console.error('일정 삭제 실패:', err);
     event.reply('delete-google-event-reply', { success: false, error: err.message });
   }
 });
 
-ipcMain.on('open-calendar', () => {
-  if (calendarWin) calendarWin.show();
-  else createCalendarWindow();
-});
 
-// ========================================================
-// 5. 앱 생명주기 (Lifecycle)
-// ========================================================
-
+// ============================================================
+// 7. 앱 생명주기
+// ============================================================
 app.whenReady().then(() => {
-  createDayBarWindow();   
-  createCalendarWindow(); 
-  createSystemTray('en'); 
+  createDayBarWindow();
+  createCalendarWindow();
+  createSystemTray('en');
 });
 
-// 트레이 기반 앱이므로 창이 모두 닫혀도 종료하지 않음
-app.on('window-all-closed', () => { 
-  if (process.platform !== 'darwin') {} 
-});
-
-app.on('activate', () => { 
-  if (BrowserWindow.getAllWindows().length === 0) createDayBarWindow(); 
+app.on('window-all-closed', () => { /* 트레이 앱 — 종료하지 않음 */ });
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createDayBarWindow();
 });
