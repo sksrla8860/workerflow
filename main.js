@@ -3,6 +3,8 @@ const path = require('path');
 const { google } = require('googleapis');
 const fs = require('fs').promises;
 
+app.setAppUserModelId('com.shinetic.workerflow'); 
+
 // 하드웨어 가속 끄기 (화면 깨짐 및 좌표 오류 방지 - 필요 시 주석 해제)
 //app.disableHardwareAcceleration();
 
@@ -37,10 +39,10 @@ function createDayBarWindow() {
     width: width, 
     height: 120,
     frame: false, 
-    //transparent: true,
-    backgroundColor: 'rgba(255, 255, 255, 0)',
-    backgroundMaterial: 'acrylic', 
-    //backgroundMaterial: 'mica', 
+    transparent: false,
+    backgroundColor: '#00000000',
+    //backgroundMaterial: 'acrylic', 
+    backgroundMaterial: 'mica', 
     show: false,
     alwaysOnTop: false,
     skipTaskbar: false,
@@ -79,9 +81,10 @@ function createCalendarWindow() {
   calendarWin = new BrowserWindow({
     width: 900, height: 700,
     frame: false,            
-    //transparent: true,
-    backgroundColor: 'rgba(255, 255, 255, 0)',
-    backgroundMaterial: 'acrylic',
+    skipTaskbar: true,
+    transparent: false,
+    backgroundColor: '#00000000',
+    backgroundMaterial: 'mica',
     show: false,
     hasShadow: false,        
     icon: path.join(__dirname, 'logo.png'),
@@ -359,6 +362,8 @@ ipcMain.on('add-google-event', async (event, eventData) => {
 
     // 시간 설정 (종일 vs 특정 시간)
     let startSettings, endSettings;
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
     if (eventData.isAllDay) {
       const endObj = new Date(eventData.endDate);
       endObj.setDate(endObj.getDate() + 1);
@@ -367,8 +372,8 @@ ipcMain.on('add-google-event', async (event, eventData) => {
       startSettings = { date: eventData.startDate };
       endSettings = { date: googleEndDate };
     } else {
-      startSettings = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone: 'Asia/Seoul' };
-      endSettings = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone: 'Asia/Seoul' };
+      startSettings = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone };
+      endSettings = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone };
     }
 
     // 일정 조립
@@ -380,6 +385,11 @@ ipcMain.on('add-google-event', async (event, eventData) => {
       end: endSettings,     
       reminders: reminderSettings,
     };
+
+    // 🔥 색상이 선택되었을 때만 colorId 추가
+    if (eventData.colorId && eventData.colorId !== '') {
+      newEvent.colorId = eventData.colorId;
+    }
 
     // 반복 설정
     if (eventData.repeat !== 'none') {
@@ -400,6 +410,87 @@ ipcMain.on('add-google-event', async (event, eventData) => {
   }
 });
 
+ipcMain.on('update-google-event', async (event, { eventId, eventData }) => {
+  try {
+    const auth = await authorize();
+    const calendar = google.calendar({ version: 'v3', auth });
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    // 1. 알림 설정 (구글 규격에 맞게 조립)
+    const reminderSettings = { useDefault: false, overrides: [] };
+    if (eventData.alarmMinutes !== 'none') {
+      reminderSettings.overrides.push({ 
+        method: 'popup', 
+        minutes: parseInt(eventData.alarmMinutes, 10) 
+      });
+    }
+
+    // 2. 시간 및 날짜 설정
+    let startSettings, endSettings;
+    if (eventData.isAllDay) {
+      const endObj = new Date(eventData.endDate);
+      endObj.setDate(endObj.getDate() + 1);
+      const googleEndDate = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, '0')}-${String(endObj.getDate()).padStart(2, '0')}`;
+      startSettings = { date: eventData.startDate };
+      endSettings = { date: googleEndDate };
+    } else {
+      startSettings = { dateTime: `${eventData.startDate}T${eventData.startTime}:00`, timeZone };
+      endSettings = { dateTime: `${eventData.endDate}T${eventData.endTime}:00`, timeZone };
+    }
+
+    // 3. 리소스 조립
+    const resource = {
+      summary: eventData.title,
+      location: eventData.location,
+      description: eventData.memo,
+      start: startSettings,
+      end: endSettings,
+      reminders: reminderSettings, // 🔥 알림 정보 추가
+    };
+
+    // 4. 반복 설정 (RRULE 형식)
+    if (eventData.repeat !== 'none') {
+      resource.recurrence = [`RRULE:FREQ=${eventData.repeat}`];
+    } else {
+      resource.recurrence = null; // 반복 안 함일 경우 명시적으로 제거
+    }
+
+    // 5. 색상 설정
+    if (eventData.colorId && eventData.colorId !== '') {
+      resource.colorId = eventData.colorId;
+    } else {
+      resource.colorId = null;
+    }
+
+    await calendar.events.update({
+      calendarId: 'primary',
+      eventId: eventId,
+      resource: resource
+    });
+
+    event.reply('update-google-event-reply', { success: true });
+  } catch (err) {
+    console.error('수정 실패:', err);
+    event.reply('update-google-event-reply', { success: false, error: err.message });
+  }
+});
+
+// 일정 삭제
+ipcMain.on('delete-google-event', async (event, eventId) => {
+  try {
+    const auth = await authorize();
+    const calendar = google.calendar({ version: 'v3', auth });
+    await calendar.events.delete({ calendarId: 'primary', eventId });
+    event.reply('delete-google-event-reply', { success: true });
+  } catch (err) {
+    event.reply('delete-google-event-reply', { success: false, error: err.message });
+  }
+});
+
+ipcMain.on('open-calendar', () => {
+  if (calendarWin) calendarWin.show();
+  else createCalendarWindow();
+});
 
 // ========================================================
 // 5. 앱 생명주기 (Lifecycle)
