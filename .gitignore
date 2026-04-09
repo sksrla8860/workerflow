@@ -3,9 +3,12 @@ node_modules/
 
 # 빌드 결과물 (exe 파일 등)
 dist/
+dist.bak/
 release/
 build/
-
+out/
+*.appx
+*.exe
 # 환경 변수 파일 (API 키 등 보안 정보가 있다면)
 .env
 

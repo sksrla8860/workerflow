@@ -11,17 +11,24 @@
     * { box-sizing: border-box; font-family: "Pretendard", sans-serif; user-select: none; }
 
     body {
-      margin: 0; background: transparent; color: #fff;
+      margin: 0; color: #fff;
       overflow: hidden; display: flex; flex-direction: column; height: 100vh;
+      background: transparent !important; 
+      /* 유리 테두리 빛 반사 효과 (위쪽과 왼쪽에 미세한 흰색 테두리) */
+      /* 부드러운 그림자 */
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
 
     /* ── 메인 컨테이너 ── */
     #app-container {
       width: 100%; height: 100%;
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 16px;
       display: flex; flex-direction: column;
       overflow: hidden;
+      border-radius: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      border-right: 1px solid rgba(0, 0, 0, 0.3);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.4);
     }
 
     /* ── 타이틀바 ── */
@@ -46,7 +53,7 @@
     .icon-btn.active { color: var(--accent); background: rgba(86,204,242,0.15); }
 
     /* ── 달력 영역 ── */
-    #calendar-wrapper { flex: 1; padding: 16px 20px; overflow-y: auto; }
+    #calendar-wrapper { flex: 1; padding: 16px 20px; overflow: hidden; }
 
     /* FullCalendar 스타일 */
     .fc-theme-standard td, .fc-theme-standard th { border-color: rgba(255,255,255,0.08); }
@@ -134,11 +141,11 @@
       <span class="title">Calendar</span>
     </div>
     <div class="controls">
-      <button id="btn-sync"     class="icon-btn" title="Sync">🔄</button>
-      <button id="btn-pin"      class="icon-btn" title="Pin">📌</button>
+      <button id="btn-sync" class="icon-btn" title="Sync"><img src="assets/googleLogo.svg" alt="G" style="width: 16px; height: 16px; pointer-events: none;"></button>
+      <button id="btn-pin" class="icon-btn" title="Pin">📌</button>
       <button id="btn-settings" class="icon-btn" title="Settings">⚙️</button>
-      <button id="btn-min"      class="icon-btn" title="Minimize">➖</button>
-      <button id="btn-close"    class="icon-btn" title="Close">✖️</button>
+      <button id="btn-min" class="icon-btn" title="Minimize">➖</button>
+      <button id="btn-close" class="icon-btn" title="Close">✖️</button>
     </div>
   </div>
 
@@ -184,8 +191,8 @@
       <input type="time" id="m-end-time" class="modal-input">
     </div>
 
-    <input type="text"     id="m-location" class="modal-input" placeholder="장소"       style="margin-bottom:10px;">
-    <textarea              id="m-memo"     class="modal-input" placeholder="메모" rows="2" style="resize:none; margin-bottom:12px;"></textarea>
+    <input type="text" id="m-location" class="modal-input" placeholder="장소" style="margin-bottom:10px;">
+    <textarea id="m-memo" class="modal-input" placeholder="메모" rows="2" style="resize:none; margin-bottom:12px;"></textarea>
 
     <div style="font-size:12px; color:#aaa; margin-bottom:6px;">색상</div>
     <div id="color-picker"></div>
@@ -194,7 +201,7 @@
       <select id="m-alarm"  class="modal-input">
         <option value="none">알림 없음</option>
         <option value="10">10분 전</option>
-        <option value="30" selected>30분 전</option>
+        <option value="30">30분 전</option>
         <option value="60">1시간 전</option>
       </select>
       <select id="m-repeat" class="modal-input">
@@ -224,6 +231,7 @@ let calendar;
 let isPinned = false;
 let selectedColorId = '';
 let clickTimer = null;
+let isGoogleLinked = false; //  구글 연동 상태 추적
 
 const defaultConf = { opacity: 0.1, color: '#03d8a7' };
 let conf = JSON.parse(localStorage.getItem('calendarConfig')) || defaultConf;
@@ -337,6 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
   calendar = new FullCalendar.Calendar(calEl, {
     initialView: 'dayGridMonth',
     locale: 'ko',
+    height: '100%',
     headerToolbar: { left: 'prev,next today', center: 'title', right: '' },
     selectable: true,
     selectMirror: true,
@@ -432,7 +441,22 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshCalendar();
 
   // ── 버튼 이벤트 ──
-  document.getElementById('btn-sync').addEventListener('click', refreshCalendar);
+  document.getElementById('btn-sync').addEventListener('click', () => {
+    if (isGoogleLinked) {
+      // 이미 연동되어 있다면 해제할지 물어봄
+      const msg = "구글 캘린더 연동을 해제하시겠습니까?\n\n(※ '취소'를 누르면 연동은 유지되고 최신 일정으로 새로고침 됩니다.)";
+      if (confirm(msg)) {
+        // 확인 -> 연동 해제 요청
+        window.electronAPI.send('disconnect-google');
+      } else {
+        // 취소 -> 수동 동기화(새로고침) 진행
+        refreshCalendar();
+      }
+    } else {
+      // 연동되어 있지 않다면 로그인(동기화) 진행
+      refreshCalendar();
+    }
+  });
   document.getElementById('btn-settings').addEventListener('click', toggleSettings);
   document.getElementById('btn-min').addEventListener('click',   () => window.electronAPI.send('minimize-window'));
   document.getElementById('btn-close').addEventListener('click', () => window.electronAPI.send('close-window'));
@@ -525,36 +549,56 @@ document.addEventListener('DOMContentLoaded', () => {
 // IPC 수신
 // ============================================================
 window.electronAPI.on('load-initial-events-reply', (_, result) => {
-  if (!result.success || !calendar) { if (!result.success) console.error(result.error); return; }
+  const syncBtn = document.getElementById('btn-sync');
 
+  if (!result.success || !calendar) { 
+    isGoogleLinked = false; 
+    syncBtn.style.opacity = '0.4'; // 미연동 시 버튼을 반투명하게 
+    if (!result.success && result.error !== 'No token') console.error(result.error); 
+    return; 
+  }
+  isGoogleLinked = true;
+  if(syncBtn) syncBtn.style.opacity = '1'; 
   calendar.removeAllEvents();
   result.events.forEach(item => {
     if (item.status === 'cancelled') return;
 
     let alarm = 'none';
-    if (item.reminders?.overrides?.length) alarm = String(item.reminders.overrides[0].minutes);
+    if (item.reminders && item.reminders.overrides && item.reminders.overrides.length > 0) {
+      alarm = String(item.reminders.overrides[0].minutes);
+    }
 
     let repeat = 'none';
-    if (item.recurrence?.[0]) {
-      const m = item.recurrence[0].match(/FREQ=([^;]+)/);
-      if (m) repeat = m[1];
+    if (item.recurrence && item.recurrence[0]) {
+      const match = item.recurrence[0].match(/FREQ=([^;]+)/);
+      if (match) repeat = match[1];
     }
 
     calendar.addEvent({
-      id:    item.id,
+      id: item.id,
       title: item.summary || '',
       start: item.start.dateTime || item.start.date,
-      end:   item.end.dateTime   || item.end.date,
+      end: item.end.dateTime || item.end.date,
       allDay: !!item.start.date,
       backgroundColor: item.colorId ? GOOGLE_COLORS[item.colorId] : '#56ccf2',
       extendedProps: {
         location: item.location || '',
-        memo:     item.description || '',
-        colorId:  item.colorId || '',
-        alarm, repeat
+        memo: item.description || '',
+        colorId: item.colorId || '',
+        alarm: alarm, 
+        repeat: repeat
       }
     });
   });
+});
+window.electronAPI.on('disconnect-google-reply', (_, result) => {
+  if (result.success) {
+    isGoogleLinked = false;
+    document.getElementById('btn-sync').style.opacity = '0.4';
+    calendar.removeAllEvents(); // 달력에서 구글 일정 싹 지우기
+    window.electronAPI.send('date-clicked', getLocalDateStr(new Date())); // 데이바에도 빈 일정 쏴주기
+    alert('구글 캘린더 연동이 해제되었습니다.');
+  }
 });
 
 window.electronAPI.on('add-google-event-reply',    (_, r) => r.success ? refreshCalendar() : alert('등록 실패: ' + r.error));

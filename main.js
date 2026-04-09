@@ -32,9 +32,9 @@ function createDayBarWindow() {
     width,
     height: 120,
     frame: false,
-    transparent: false,
+    transparent: true,
     backgroundColor: '#00000000',
-    backgroundMaterial: 'mica',
+    //backgroundMaterial: 'mica',
     show: false,
     alwaysOnTop: false,
     //skipTaskbar: true,
@@ -72,9 +72,9 @@ function createCalendarWindow() {
     height: 700,
     frame: false,
     skipTaskbar: true,
-    transparent: false,
+    transparent: true,
     backgroundColor: '#00000000',
-    backgroundMaterial: 'mica',
+    //backgroundMaterial: 'acrylic',
     show: false,
     hasShadow: false,
     icon: path.join(__dirname, 'logo.png'),
@@ -212,6 +212,8 @@ async function saveCredentials(client) {
   }));
 }
 
+// [main.js] Google OAuth 인증 영역의 signInWithPopup 함수 교체
+
 function signInWithPopup() {
   return new Promise(async (resolve, reject) => {
     const content = await fs.readFile(CREDENTIALS_PATH);
@@ -231,27 +233,44 @@ function signInWithPopup() {
     authWindow.loadURL(authUrl);
     authWindow.show();
 
+    let isAuthSuccess = false; // 🔥 타이밍 버그를 막기 위한 성공 깃발
+
     const handleNav = async (url) => {
       if (!url.startsWith(redirectUri)) return;
       const params = new URL(url).searchParams;
       const code = params.get('code');
       const error = params.get('error');
-      authWindow.close();
+      
       if (code) {
         try {
+          // 🔥 1. 토큰을 먼저 완벽하게 받아오고 저장합니다.
           const { tokens } = await oauth2Client.getToken(code);
           oauth2Client.setCredentials(tokens);
           await saveCredentials(oauth2Client);
+          
+          // 🔥 2. 성공 깃발을 꽂고 달력 쪽에 성공 신호를 보냅니다.
+          isAuthSuccess = true; 
           resolve(oauth2Client);
-        } catch (err) { reject(err); }
+          
+          // 🔥 3. 모든 작업이 끝난 후에 가장 마지막으로 창을 닫습니다.
+          authWindow.close(); 
+        } catch (err) { 
+          reject(err); 
+          authWindow.close();
+        }
       } else {
         reject(new Error(error || '인증 실패'));
+        authWindow.close();
       }
     };
 
     authWindow.webContents.on('will-redirect', (_, url) => handleNav(url));
     authWindow.webContents.on('will-navigate',  (_, url) => handleNav(url));
-    authWindow.on('closed', () => reject(new Error('로그인 창이 닫혔습니다.')));
+    
+    authWindow.on('closed', () => {
+      // 🔥 유저가 X 버튼을 눌러 강제로 닫았을 때만 에러로 처리합니다.
+      if (!isAuthSuccess) reject(new Error('로그인 창이 닫혔습니다.'));
+    });
   });
 }
 
@@ -366,15 +385,15 @@ ipcMain.on('load-initial-events', async (event) => {
   try {
     const auth = await authorize();
     const cal = google.calendar({ version: 'v3', auth });
-
-    const timeMin = new Date(); timeMin.setMonth(timeMin.getMonth() - 1);
-    const timeMax = new Date(); timeMax.setMonth(timeMax.getMonth() + 6);
+    const now = new Date();
+    const pastYear = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString();
+    const nextYear = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()).toISOString();
 
     const res = await cal.events.list({
       calendarId: 'primary',
-      timeMin: timeMin.toISOString(),
-      timeMax: timeMax.toISOString(),
-      maxResults: 250,
+      timeMin: pastYear,
+      timeMax: nextYear,
+      maxResults: 2500,
       singleEvents: true,
       orderBy: 'startTime',
     });
@@ -432,6 +451,19 @@ ipcMain.on('delete-google-event', async (event, eventId) => {
   }
 });
 
+// 🔥 일정 연동 해제 (로그아웃)
+ipcMain.on('disconnect-google', async (event) => {
+  try {
+    // token.json 파일을 삭제하여 인증 권한을 초기화합니다.
+    await fs.unlink(TOKEN_PATH);
+    cachedGoogleEvents = []; // 메모리에 남은 캐시도 싹 비움
+    event.reply('disconnect-google-reply', { success: true });
+  } catch (err) {
+    // 파일이 이미 없거나 에러가 나도, 일단 해제된 것으로 취급하고 프론트에 성공 신호를 보냄
+    cachedGoogleEvents = [];
+    event.reply('disconnect-google-reply', { success: true });
+  }
+});
 
 // ============================================================
 // 7. 앱 생명주기

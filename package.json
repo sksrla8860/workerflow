@@ -1,7 +1,7 @@
 {
   "name": "worker-flow",
   "productName": "WorkerFlow",
-  "version": "1.0.1",
+  "version": "2.0.1",
   "description": "Desktop Timeline Widget",
   "main": "main.js",
   "scripts": {
@@ -48,7 +48,8 @@
       "identityName": "shinetic.workerflow",
       "publisher": "CN=23DB3E70-433B-4176-AB45-5B57DA2514FB",
       "publisherDisplayName": "shinetic",
-      "backgroundColor": "#03D8A7"
+      "backgroundColor": "#03D8A7",
+      "languages": ["en-US", "ko-KR", "ja-JP", "zh-CN", "es-ES"]
     }
   }
 }

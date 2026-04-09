@@ -11,7 +11,9 @@
       margin: 0; overflow: hidden; user-select: none;
       width: 100%; height: 100vh;
       -webkit-app-region: no-drag;
-      background: transparent;
+      background: transparent !important; 
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     /* ── 메인 컨테이너 ── */
@@ -19,9 +21,18 @@
       position: relative; width: 100%; height: 100%;
       display: flex; flex-direction: column;
       border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 16px;
       overflow: hidden;
       transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      background: rgba(30, 30, 30, 0.85); 
+      border-radius: 20px; 
+      overflow: hidden; 
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); 
+
+      background: rgba(30, 30, 30, 0.85); 
+      border-top: 1px solid rgb(255 255 255 / 25%);
+      border-left: 1px solid rgb(255 255 255 / 20%);
+      border-right: 1px solid rgb(255 255 255 / 15%);
+      border-bottom: 1px solid rgb(255 255 255 / 10%);
     }
     #widget-container.vertical-mode { flex-direction: row; }
 
@@ -166,7 +177,9 @@
     #settings-panel {
       display: none;
       position: fixed;
-      top: 50px; right: 16px;
+      top: 50px; 
+      left: 50%;
+      margin-left: -130px;
       width: 260px;
       background: #1f1f1f;
       border: 1px solid #333; border-radius: 12px;
@@ -226,6 +239,26 @@
       cursor: pointer; color: #666; background: none; border: none; font-size: 18px;
     }
     .close-panel-btn:hover { color: #fff; }
+
+    /* ── [추가] 일정 블록 내부 리사이즈 핸들 ── */
+    .blk-resize {
+      position: absolute;
+      z-index: 50;
+      background: rgba(255,255,255,0.0); /* 기본은 투명 */
+      -webkit-app-region: no-drag;       /* 창 드래그 방지 */
+    }
+    .blk-resize:hover {
+      background: rgba(255,255,255,0.4); /* 마우스 올리면 살짝 하얗게 보임 */
+    }
+    /* 가로 모드용 핸들 */
+    .h-handle { top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+    .h-left   { left: 0; border-radius: 6px 0 0 6px; }
+    .h-right  { right: 0; border-radius: 0 6px 6px 0; }
+
+    /* 세로 모드용 핸들 */
+    .v-handle { left: 0; right: 0; height: 6px; cursor: ns-resize; }
+    .v-top    { top: 0; border-radius: 6px 6px 0 0; }
+    .v-bottom { bottom: 0; border-radius: 0 0 6px 6px; }
 
     /* ── 리사이즈 핸들 ── */
     .win-resize-handle {
@@ -563,10 +596,65 @@ function renderView() {
       }
     }
 
-    // 로컬 일정만 클릭 시 편집 모달
+    // 로컬 일정: 이동(Drag) 및 클릭(Click) 처리
     if (!sch.isGoogle) {
       block.addEventListener('mousedown', (e) => {
-        if (!e.target.classList.contains('blk-resize')) openModal(sch);
+        if (e.target.classList.contains('blk-resize')) return; // 양끝 조절 핸들은 제외
+        e.stopPropagation();
+
+        let isDragging = false;
+        let duration = sch.end - sch.start;
+        const isVertical = container.classList.contains('vertical-mode');
+        const rect = track.getBoundingClientRect();
+        const range = config.end - config.start;
+        const total = isVertical ? rect.height : rect.width;
+
+        // 마우스로 잡은 블록 안의 미세한 위치(Offset) 계산
+        const blockRect = block.getBoundingClientRect();
+        const offsetPx = isVertical ? (e.clientY - blockRect.top) : (e.clientX - blockRect.left);
+
+        const onMove = (ev) => {
+          isDragging = true;
+          block.style.zIndex = '999'; // 드래그 중 최상단 노출
+
+          const curPx = isVertical ? (ev.clientY - rect.top) : (ev.clientX - rect.left);
+          let startPx = curPx - offsetPx;
+          let time = config.start + (startPx / total * range);
+
+          let newStart = snap(time);
+          let newEnd = newStart + duration;
+
+          // 데이바 화면 밖으로 못 나가게 제한
+          if (newStart < config.start) { newStart = config.start; newEnd = newStart + duration; }
+          if (newEnd > config.end) { newEnd = config.end; newStart = newEnd - duration; }
+
+          // 부드러운 화면 이동
+          const startP = ((newStart - config.start) / range) * 100;
+          if (isVertical) block.style.top = startP + '%';
+          else            block.style.left = startP + '%';
+
+          block.dataset.newStart = newStart;
+          block.dataset.newEnd = newEnd;
+        };
+
+        const onUp = (ev) => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          
+          if (isDragging && block.dataset.newStart) {
+            // 드래그가 끝났으면 저장하고 렌더링
+            sch.start = parseFloat(block.dataset.newStart);
+            sch.end = parseFloat(block.dataset.newEnd);
+            saveSchedules();
+            renderView();
+          } else {
+            // 드래그를 안 하고 제자리에서 마우스를 뗐다면 모달(편집창) 열기
+            openModal(sch);
+          }
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
       });
     }
 
@@ -864,18 +952,51 @@ function setupBlockResize(block, sch, type) {
     const isVertical = container.classList.contains('vertical-mode');
     const range = config.end - config.start;
     const rect  = track.getBoundingClientRect();
+    
+    let originalStart = sch.start;
+    let originalEnd   = sch.end;
+
+    const onMove = (ev) => {
+      const cur = isVertical ? (ev.clientY - rect.top) : (ev.clientX - rect.left);
+      const total = isVertical ? rect.height : rect.width;
+      let time = snap(config.start + (cur / total * range));
+
+      let newStart = originalStart;
+      let newEnd   = originalEnd;
+
+      if (type === 'left' || type === 'top') {
+         newStart = Math.min(originalEnd - 0.25, time); // 최소 15분 길이 보장
+         newStart = Math.max(config.start, newStart);
+      } else {
+         newEnd = Math.max(originalStart + 0.25, time);
+         newEnd = Math.min(config.end, newEnd);
+      }
+
+      // 화면 즉시 업데이트
+      const startP = ((newStart - config.start) / range) * 100;
+      const durP   = ((newEnd - newStart) / range) * 100;
+
+      if (isVertical) {
+         block.style.top = startP + '%'; block.style.height = durP + '%';
+      } else {
+         block.style.left = startP + '%'; block.style.width = durP + '%';
+      }
+      
+      block.dataset.newStart = newStart;
+      block.dataset.newEnd   = newEnd;
+    };
 
     const onUp = (ev) => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      const cur   = isVertical ? (ev.clientY - rect.top) : (ev.clientX - rect.left);
-      const total = isVertical ? rect.height : rect.width;
-      const time  = config.start + (cur / total * range);
-      if (type==='left'||type==='top')  sch.start = Math.min(sch.end - 0.25, snap(time));
-      else                               sch.end   = Math.max(sch.start + 0.25, snap(time));
-      saveSchedules(); renderView();
+      if (block.dataset.newStart) {
+         sch.start = parseFloat(block.dataset.newStart);
+         sch.end   = parseFloat(block.dataset.newEnd);
+         saveSchedules();
+         renderView();
+       }
     };
-    const onMove = () => {};
+    
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   });
