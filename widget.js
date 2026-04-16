@@ -1,0 +1,636 @@
+// ============================================================
+// 상태
+// ============================================================
+const DEFAULT_CONFIG = {
+  position: 'bottom', manualSize: 120,
+  start: 9, end: 18,
+  pinned: true, autoStart: true,
+  bgColor: '#03d8a7', bgOpacity: 0.1
+};
+
+let config          = JSON.parse(localStorage.getItem('widgetConfig'))      || DEFAULT_CONFIG;
+let localSchedules  = JSON.parse(localStorage.getItem('timelineSchedules')) || [];
+let googleDayEvents = []; // 현재 선택된 날짜의 Google 일정
+let currentDate     = new Date();
+let editId          = null;
+let tempColor       = '#56ccf2';
+let winResizing     = false;
+let dragStart       = null;
+
+const COLORS = ['#56ccf2', '#ff4757', '#2ecc71', '#f1c40f', '#9b59b6'];
+
+// Google Calendar colorId → hex
+const GOOGLE_COLORS = {
+  '1':'#7986cb','2':'#33b679','3':'#8e24aa','4':'#e67c73',
+  '5':'#f6c026','6':'#f5511d','7':'#039be5','8':'#616161',
+  '9':'#3f51b5','10':'#0b8043','11':'#d50000'
+};
+
+// ============================================================
+// DOM 참조
+// ============================================================
+const container     = document.getElementById('widget-container');
+const track         = document.getElementById('timeline-track');
+const settingsPanel = document.getElementById('settings-panel');
+const scheduleModal = document.getElementById('schedule-modal');
+const errorMsg      = document.getElementById('modal-error-msg');
+
+// ============================================================
+// 다국어
+// ============================================================
+const TRANSLATIONS = {
+  en: { settingsTitle:'Settings', languageLabel:'Language', bgOpacityLabel:'Background', fontSizeLabel:'Font Size', resetBtn:'Reset', quitAppBtn:'Quit App', resetConfirm:'Reset all data?', quitConfirm:'Quit app?', autoStartLabel:'Run at Startup' },
+  ko: { settingsTitle:'설정', languageLabel:'언어', bgOpacityLabel:'배경', fontSizeLabel:'글자 크기', resetBtn:'초기화', quitAppBtn:'종료', resetConfirm:'모든 데이터를 초기화하시겠습니까?', quitConfirm:'프로그램을 종료하시겠습니까?', autoStartLabel:'시작 시 자동 실행' },
+  ja: { settingsTitle:'設定', languageLabel:'言語', bgOpacityLabel:'背景', fontSizeLabel:'フォントサイズ', resetBtn:'初期化', quitAppBtn:'終了', resetConfirm:'データをリセットしますか？', quitConfirm:'終了しますか？', autoStartLabel:'スタートアップ時に実行' },
+  zh: { settingsTitle:'设置', languageLabel:'语言', bgOpacityLabel:'背景', fontSizeLabel:'字体', resetBtn:'重置', quitAppBtn:'退出', resetConfirm:'确定重置？', quitConfirm:'确定退出？', autoStartLabel:'开机自启' },
+  es: { settingsTitle:'Configuración', languageLabel:'Idioma', bgOpacityLabel:'Fondo', fontSizeLabel:'Fuente', resetBtn:'Restablecer', quitAppBtn:'Salir', resetConfirm:'¿Restablecer?', quitConfirm:'¿Salir?', autoStartLabel:'Ejecutar al inicio' }
+};
+
+// ============================================================
+// 초기화
+// ============================================================
+function init() {
+  document.getElementById('set-position').value    = config.position || 'bottom';
+  document.getElementById('set-start-hour').value  = config.start;
+  document.getElementById('set-end-hour').value    = config.end;
+  document.getElementById('set-auto-start').checked = config.autoStart;
+  document.getElementById('set-bg-color').value    = config.bgColor;
+  document.getElementById('set-opacity').value     = config.bgOpacity;
+
+  const savedFontSize = localStorage.getItem('appFontSize') || '14';
+  document.getElementById('set-font-size').value   = savedFontSize;
+  document.getElementById('font-size-val').innerText = savedFontSize + 'px';
+  document.body.style.fontSize = savedFontSize + 'px';
+
+  const savedLang = localStorage.getItem('appLanguage') || 'en';
+  changeLanguage(savedLang);
+  // updatePin(config.pinned);
+  applyTheme();
+  applyLayout();
+
+  window.electronAPI.send('change-language', savedLang);
+  window.electronAPI.send('set-auto-start', config.autoStart);
+}
+
+// ============================================================
+// 테마
+// ============================================================
+function applyTheme() {
+  const hex = config.bgColor || '#03d8a7';
+  const op  = config.bgOpacity !== undefined ? config.bgOpacity : 0.1;
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  container.style.background = `rgba(${r},${g},${b},${op})`;
+  document.getElementById('set-bg-color').value = hex;
+  document.getElementById('set-opacity').value  = op;
+}
+
+// ============================================================
+// 레이아웃 (위치/방향)
+// ============================================================
+function applyLayout() {
+  const pos = config.position;
+  const isVertical = (pos === 'left' || pos === 'right');
+  container.classList.toggle('vertical-mode', isVertical);
+
+  document.querySelectorAll('.win-resize-handle').forEach(el => el.style.display = 'none');
+  const handleMap = { top: 'resize-bottom', bottom: 'resize-top', left: 'resize-right', right: 'resize-left' };
+  const handleEl = document.getElementById(handleMap[pos]);
+  if (handleEl) handleEl.style.display = 'block';
+
+  window.electronAPI.send('update-widget-bounds', { position: pos, size: config.manualSize });
+  renderView();
+}
+
+// ============================================================
+// 렌더링
+// ============================================================
+function renderView() {
+  // 선택 박스는 제거 후 다시 추가
+  const selBox = document.getElementById('selection-box');
+  track.innerHTML = '<div id="current-time-line"></div>';
+  track.appendChild(selBox);
+
+  const isVertical = container.classList.contains('vertical-mode');
+  const range = config.end - config.start;
+  
+  // 눈금 마커
+  for (let i = config.start; i <= config.end; i++) {
+    const p = ((i - config.start) / range) * 100;
+    const el = document.createElement('div');
+    el.className = 'hour-marker';
+    el.innerText = i;
+    if (isVertical) { el.style.top = p + '%'; el.style.width = '100%'; }
+    else            { el.style.left = p + '%'; el.style.height = '100%'; }
+    track.appendChild(el);
+  }
+
+  // 현재 날짜 키
+  const dateKey = formatDateKey(currentDate);
+
+  // 로컬 일정: isGlobal=true 이거나 현재 날짜와 일치하는 것
+  const localToShow = localSchedules.filter(s => s.isGlobal || s.date === dateKey);
+
+  // Google 일정: 현재 선택된 날짜 기준으로 main.js에서 받아온 것
+  const googleToShow = googleDayEvents.map(item => {
+    if (!item.start) return null;
+    const startDT = item.start.dateTime || item.start.date;
+    const endDT   = item.end.dateTime   || item.end.date;
+    if (!startDT) return null;
+
+    const startDate = new Date(startDT);
+    const endDate   = new Date(endDT);
+    const isAllDay  = !!item.start.date;
+
+    let startH, endH;
+    if (isAllDay) {
+      startH = 0; endH = 24;
+    } else {
+      startH = startDate.getHours() + startDate.getMinutes() / 60;
+      endH   = endDate.getHours()   + endDate.getMinutes()   / 60;
+    }
+    return {
+      id: item.id,
+      title: item.summary || '(제목 없음)',
+      start: startH, end: endH,
+      color: item.colorId ? GOOGLE_COLORS[item.colorId] : '#039be5',
+      isGoogle: true
+    };
+  }).filter(Boolean);
+
+  // 합쳐서 레인 계산
+  const allBlocks = [...localToShow, ...googleToShow].sort((a,b) => a.start - b.start);
+  const lanes = [];
+  allBlocks.forEach(sch => {
+    let lane = 0;
+    while (true) {
+      if (!lanes[lane] || lanes[lane] <= sch.start) { lanes[lane] = sch.end; sch.lane = lane; break; }
+      lane++;
+    }
+  });
+
+  const BLOCK_H = 24, BLOCK_GAP = 4;
+  allBlocks.forEach(sch => {
+    
+    // 🔥 안전장치: 현재 데이바에 설정된 시간 범위(config.start ~ config.end) 안에서
+    // 화면에 실제로 보여야 할 '진짜 시작 시간'과 '진짜 종료 시간'을 잘라냅니다.
+    const visibleStart = Math.max(config.start, sch.start);
+    const visibleEnd   = Math.min(config.end, sch.end);
+
+    // 일정이 현재 설정된 데이바 표시 시간(예: 09:00~18:00)을 완전히 벗어났다면 그리지 않음
+    if (visibleEnd <= visibleStart) return;
+
+    // 화면에 그릴 퍼센트 위치와 길이 재계산
+    const startP = ((visibleStart - config.start) / range) * 100;
+    const durP   = ((visibleEnd - visibleStart) / range) * 100;
+
+    const block = document.createElement('div');
+    block.className = 'schedule-block' + (sch.isGoogle ? ' google-event' : '');
+    block.innerText = sch.title;
+    block.style.backgroundColor = sch.color || '#56ccf2';
+
+    // 🔥 툴팁(Tooltip) 추가: 마우스를 올리면 제목과 시간이 팝업으로 뜹니다!
+    const startTimeStr = decToStr(sch.start);
+    const endTimeStr = decToStr(sch.end);
+    block.dataset.tooltipText = `📌 ${sch.title}\n⏰ ${startTimeStr} ~ ${endTimeStr}`;
+
+    const offset = 10 + (sch.lane * (BLOCK_H + BLOCK_GAP));
+    if (isVertical) {
+      block.style.top    = startP + '%'; block.style.height = durP + '%';
+      block.style.left   = offset + 'px'; block.style.width = BLOCK_H + 'px';
+      if (!sch.isGoogle) {
+        block.innerHTML += `<div class="blk-resize v-handle v-top"></div><div class="blk-resize v-handle v-bottom"></div>`;
+        setupBlockResize(block, sch, 'top'); setupBlockResize(block, sch, 'bottom');
+      }
+    } else {
+      block.style.left   = startP + '%'; block.style.width  = durP + '%';
+      block.style.top    = offset + 'px'; block.style.height = BLOCK_H + 'px';
+      if (!sch.isGoogle) {
+        block.innerHTML += `<div class="blk-resize h-handle h-left"></div><div class="blk-resize h-handle h-right"></div>`;
+        setupBlockResize(block, sch, 'left'); setupBlockResize(block, sch, 'right');
+      }
+    }
+
+    // 로컬 일정: 이동(Drag) 및 클릭(Click) 처리
+    if (!sch.isGoogle) {
+      block.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('blk-resize')) return; // 양끝 조절 핸들은 제외
+        e.stopPropagation();
+
+        let isDragging = false;
+        let duration = sch.end - sch.start;
+        const isVertical = container.classList.contains('vertical-mode');
+        const rect = track.getBoundingClientRect();
+        const range = config.end - config.start;
+        const total = isVertical ? rect.height : rect.width;
+
+        // 마우스로 잡은 블록 안의 미세한 위치(Offset) 계산
+        const blockRect = block.getBoundingClientRect();
+        const offsetPx = isVertical ? (e.clientY - blockRect.top) : (e.clientX - blockRect.left);
+
+        const onMove = (ev) => {
+          isDragging = true;
+          block.style.zIndex = '999'; // 드래그 중 최상단 노출
+
+          const curPx = isVertical ? (ev.clientY - rect.top) : (ev.clientX - rect.left);
+          let startPx = curPx - offsetPx;
+          let time = config.start + (startPx / total * range);
+
+          let newStart = snap(time);
+          let newEnd = newStart + duration;
+
+          // 데이바 화면 밖으로 못 나가게 제한
+          if (newStart < config.start) { newStart = config.start; newEnd = newStart + duration; }
+          if (newEnd > config.end) { newEnd = config.end; newStart = newEnd - duration; }
+
+          // 부드러운 화면 이동
+          const startP = ((newStart - config.start) / range) * 100;
+          if (isVertical) block.style.top = startP + '%';
+          else            block.style.left = startP + '%';
+
+          block.dataset.newStart = newStart;
+          block.dataset.newEnd = newEnd;
+        };
+
+        const onUp = (ev) => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          
+          if (isDragging && block.dataset.newStart) {
+            // 드래그가 끝났으면 저장하고 렌더링
+            sch.start = parseFloat(block.dataset.newStart);
+            sch.end = parseFloat(block.dataset.newEnd);
+            saveSchedules();
+            renderView();
+          } else {
+            // 드래그를 안 하고 제자리에서 마우스를 뗐다면 모달(편집창) 열기
+            openModal(sch);
+          }
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    }
+
+    track.appendChild(block);
+  });
+
+  updateTimeLine();
+}
+
+function updateTimeLine() {
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes();
+  document.getElementById('clock').innerText = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+
+  const cur = h + m / 60;
+  const p   = ((cur - config.start) / (config.end - config.start)) * 100;
+  const line = document.getElementById('current-time-line');
+  const isVertical = container.classList.contains('vertical-mode');
+
+  if (p >= 0 && p <= 100) {
+    line.style.display = 'block';
+    if (isVertical) { line.style.top = p+'%'; line.style.width='100%'; line.style.left=0; line.style.height='2px'; }
+    else            { line.style.left = p+'%'; line.style.height='100%'; line.style.top=0; line.style.width='2px'; }
+  } else {
+    line.style.display = 'none';
+  }
+}
+
+// ============================================================
+// 유틸
+// ============================================================
+function formatDateKey(d) {
+  return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+}
+function snap(v)        { return Math.round(v * 12) / 12; }
+function decToStr(v)    { if(isNaN(v)) return '00:00'; const h=Math.floor(v), m=Math.round((v-h)*60); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
+function strToDec(s)    { const [h,m]=s.split(':').map(Number); return h+m/60; }
+function saveConfig()   { localStorage.setItem('widgetConfig', JSON.stringify(config)); }
+function saveSchedules(){ localStorage.setItem('timelineSchedules', JSON.stringify(localSchedules)); }
+function resetData()    { localStorage.clear(); location.reload(); }
+
+// ============================================================
+// 모달
+// ============================================================
+const colorContainer = document.getElementById('color-picker');
+
+function renderColorPicker() {
+  colorContainer.innerHTML = '';
+  COLORS.forEach(c => {
+    const d = document.createElement('div');
+    d.style.cssText = `width:20px;height:20px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${tempColor===c?'white':'transparent'};`;
+    d.onclick = () => { tempColor = c; renderColorPicker(); };
+    colorContainer.appendChild(d);
+  });
+}
+
+function openModal(sch, s, e) {
+  document.getElementById('modal-title-text').innerText = sch ? 'Edit Schedule' : 'New Schedule';
+  scheduleModal.style.display = 'flex';
+  toggleExpand(true);
+  errorMsg.style.display = 'none';
+
+  if (sch) {
+    editId = sch.id;
+    document.getElementById('modal-title').value  = sch.title;
+    document.getElementById('modal-start').value  = decToStr(sch.start);
+    document.getElementById('modal-end').value    = decToStr(sch.end);
+    tempColor = sch.color;
+    document.getElementById('btn-delete').style.display = 'block';
+  } else {
+    editId = null;
+    document.getElementById('modal-title').value  = '';
+    document.getElementById('modal-start').value  = decToStr(s);
+    document.getElementById('modal-end').value    = decToStr(e);
+    tempColor = COLORS[0];
+    document.getElementById('btn-delete').style.display = 'none';
+  }
+  renderColorPicker();
+  document.getElementById('modal-title').focus();
+}
+
+function closeModal() {
+  scheduleModal.style.display = 'none';
+  if (settingsPanel.style.display !== 'block') toggleExpand(false);
+}
+
+function showError(msg) { errorMsg.innerText = msg; errorMsg.style.display = 'block'; }
+
+// ============================================================
+// 설정 패널
+// ============================================================
+function openSettings()  { settingsPanel.style.display = 'block'; toggleExpand(true); }
+function closeSettings() {
+  settingsPanel.style.display = 'none';
+  if (scheduleModal.style.display !== 'flex') toggleExpand(false);
+}
+
+function changeLanguage(lang) {
+  localStorage.setItem('appLanguage', lang);
+  const t = TRANSLATIONS[lang] || TRANSLATIONS.en;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (t[key]) el.innerText = t[key];
+  });
+  document.getElementById('language-select').value = lang;
+  window.electronAPI.send('change-language', lang);
+}
+
+// function updatePin(p) {
+//   window.electronAPI.send('toggle-pin', p);
+//   document.getElementById('btn-toggle-pin').classList.toggle('pinned', p);
+// }
+
+function toggleExpand(ex) { window.electronAPI.send('set-expand-mode', ex); }
+
+// ============================================================
+// 이벤트 바인딩
+// ============================================================
+document.getElementById('btn-open-calendar').addEventListener('click', () => window.electronAPI.send('open-calendar'));
+document.getElementById('btn-minimize').addEventListener('click',      () => window.electronAPI.send('minimize-window'));
+document.getElementById('btn-app-close').addEventListener('click',     () => window.electronAPI.send('close-window'));
+
+// document.getElementById('btn-toggle-pin').addEventListener('click', () => {
+//   config.pinned = !config.pinned; updatePin(config.pinned); saveConfig();
+// });
+
+document.getElementById('btn-open-settings').addEventListener('click', () => {
+  if (settingsPanel.style.display === 'block') closeSettings(); else openSettings();
+});
+
+document.getElementById('btn-real-quit').addEventListener('click', () => {
+  const lang = localStorage.getItem('appLanguage') || 'en';
+  if (confirm(TRANSLATIONS[lang].quitConfirm)) window.electronAPI.send('force-quit');
+});
+
+// 설정값 변경
+document.getElementById('set-position').addEventListener('change', (e) => { config.position = e.target.value; saveConfig(); applyLayout(); });
+document.getElementById('set-start-hour').addEventListener('change', (e) => { config.start = Number(e.target.value); saveConfig(); renderView(); });
+document.getElementById('set-end-hour').addEventListener('change', (e)   => { config.end   = Number(e.target.value); saveConfig(); renderView(); });
+document.getElementById('set-bg-color').addEventListener('input', (e)    => { config.bgColor   = e.target.value; saveConfig(); applyTheme(); });
+document.getElementById('set-opacity').addEventListener('input', (e)     => { config.bgOpacity = parseFloat(e.target.value); saveConfig(); applyTheme(); });
+document.getElementById('set-auto-start').addEventListener('change', (e) => { config.autoStart = e.target.checked; saveConfig(); window.electronAPI.send('set-auto-start', config.autoStart); });
+document.getElementById('set-font-size').addEventListener('input', (e)   => {
+  const sz = e.target.value;
+  document.getElementById('font-size-val').innerText = sz + 'px';
+  document.body.style.fontSize = sz + 'px';
+  localStorage.setItem('appFontSize', sz);
+});
+document.getElementById('language-select').addEventListener('change', (e) => changeLanguage(e.target.value));
+
+// 모달 저장/취소/삭제
+document.getElementById('btn-save').addEventListener('click', () => {
+  const title = document.getElementById('modal-title').value;
+  const s = strToDec(document.getElementById('modal-start').value);
+  const e = strToDec(document.getElementById('modal-end').value);
+  if (!title.trim())         { showError('Schedule name is required.'); return; }
+  if (isNaN(s)||isNaN(e)||s>=e) { showError('Invalid time range.'); return; }
+
+  const dateKey = formatDateKey(currentDate);
+  if (editId) {
+    const t = localSchedules.find(x => x.id === editId);
+    if (t) { t.title = title; t.start = s; t.end = e; t.color = tempColor; }
+  } else {
+    localSchedules.push({ id: Date.now(), title, start: s, end: e, color: tempColor, date: dateKey, isGlobal: true });
+  }
+  saveSchedules(); closeModal(); renderView();
+});
+
+document.getElementById('btn-cancel').addEventListener('click', closeModal);
+document.getElementById('btn-delete').addEventListener('click', () => {
+  if (confirm('Delete this schedule?')) {
+    localSchedules = localSchedules.filter(x => x.id !== editId);
+    saveSchedules(); closeModal(); renderView();
+  }
+});
+
+['modal-title','modal-start','modal-end'].forEach(id => {
+  document.getElementById(id).addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') document.getElementById('btn-save').click();
+  });
+});
+
+scheduleModal.addEventListener('mousedown', (e) => e.stopPropagation());
+settingsPanel.addEventListener('mousedown', (e) => e.stopPropagation());
+
+// ============================================================
+// 드래그 선택 (새 일정)
+// ============================================================
+const selBox  = document.getElementById('selection-box');
+const selText = document.getElementById('selection-text');
+
+track.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.schedule-block')) return;
+  if (settingsPanel.style.display === 'block') closeSettings();
+
+  const isVertical = container.classList.contains('vertical-mode');
+  const rect = track.getBoundingClientRect();
+  const pos  = isVertical ? (e.clientY - rect.top) : (e.clientX - rect.left);
+  dragStart  = { pos, total: isVertical ? rect.height : rect.width };
+
+  selBox.style.display = 'block';
+  selText.innerText = '';
+  if (isVertical) { selBox.style.left='0'; selBox.style.width='100%'; selBox.style.top=pos+'px'; selBox.style.height='1px'; }
+  else            { selBox.style.top='0';  selBox.style.height='100%'; selBox.style.left=pos+'px'; selBox.style.width='1px'; }
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (winResizing) {
+    const pos = config.position; let newSize = 120;
+    if (pos==='top')    newSize = e.clientY;
+    if (pos==='bottom') newSize = window.innerHeight - e.clientY;
+    if (pos==='left')   newSize = e.clientX;
+    if (pos==='right')  newSize = window.innerWidth - e.clientX;
+    config.manualSize = Math.max(85, newSize);
+    window.electronAPI.send('update-widget-bounds', { position: pos, size: config.manualSize });
+    return;
+  }
+  if (!dragStart) return;
+
+  const isVertical = container.classList.contains('vertical-mode');
+  const rect = track.getBoundingClientRect();
+  const cur  = isVertical ? (e.clientY - rect.top) : (e.clientX - rect.left);
+  const start = Math.min(dragStart.pos, cur), size = Math.abs(cur - dragStart.pos);
+
+  if (isVertical) { selBox.style.top=start+'px'; selBox.style.height=size+'px'; }
+  else            { selBox.style.left=start+'px'; selBox.style.width=size+'px'; }
+
+  const range = config.end - config.start;
+  const t1 = config.start + (start / dragStart.total * range);
+  const t2 = config.start + ((start+size) / dragStart.total * range);
+  selText.innerText = `${decToStr(snap(t1))} ~ ${decToStr(snap(t2))}`;
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (winResizing) { winResizing = false; saveConfig(); return; }
+  if (!dragStart) return;
+
+  selBox.style.display = 'none';
+  const isVertical = container.classList.contains('vertical-mode');
+  const rect = track.getBoundingClientRect();
+  const cur  = isVertical ? (e.clientY - rect.top) : (e.clientX - rect.left);
+  const p1   = Math.min(dragStart.pos, cur) / dragStart.total;
+  const p2   = Math.max(dragStart.pos, cur) / dragStart.total;
+  const range = config.end - config.start;
+  let s = config.start + p1 * range, en = config.start + p2 * range;
+  if (en - s < 0.2) en = s + 1;
+  dragStart = null;
+  openModal(null, snap(s), snap(en));
+});
+
+const customTooltip = document.getElementById('custom-tooltip');
+
+// 트랙(달력 영역) 위에서 마우스가 움직일 때
+track.addEventListener('mousemove', (e) => {
+  // 현재 마우스가 올라간 곳이 일정 블록인지 확인
+  const block = e.target.closest('.schedule-block');
+  
+  if (block && block.dataset.tooltipText) {
+    // 툴팁에 텍스트 넣기
+    customTooltip.innerText = block.dataset.tooltipText;
+    
+    // 마우스 포인터의 오른쪽 아래로 툴팁 위치 이동
+    customTooltip.style.left = (e.clientX + 15) + 'px';
+    customTooltip.style.top = (e.clientY + 15) + 'px';
+    
+    // 스르륵 나타나게 하기
+    customTooltip.style.opacity = '1';
+  } else {
+    // 블록 밖으로 나가면 숨기기
+    customTooltip.style.opacity = '0';
+  }
+});
+
+// 아예 앱 화면 밖으로 마우스가 나가면 숨기기
+document.body.addEventListener('mouseleave', () => {
+  customTooltip.style.opacity = '0';
+});
+
+document.querySelectorAll('.win-resize-handle').forEach(h => {
+  h.addEventListener('mousedown', (e) => { winResizing = true; e.preventDefault(); });
+});
+
+// ============================================================
+// 블록 리사이즈
+// ============================================================
+function setupBlockResize(block, sch, type) {
+  const selector = { left:'.h-left', right:'.h-right', top:'.v-top', bottom:'.v-bottom' };
+  const handle = block.querySelector(selector[type]);
+  if (!handle) return;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.stopPropagation(); e.preventDefault();
+    const isVertical = container.classList.contains('vertical-mode');
+    const range = config.end - config.start;
+    const rect  = track.getBoundingClientRect();
+    
+    let originalStart = sch.start;
+    let originalEnd   = sch.end;
+
+    const onMove = (ev) => {
+      const cur = isVertical ? (ev.clientY - rect.top) : (ev.clientX - rect.left);
+      const total = isVertical ? rect.height : rect.width;
+      let time = snap(config.start + (cur / total * range));
+
+      let newStart = originalStart;
+      let newEnd   = originalEnd;
+
+      if (type === 'left' || type === 'top') {
+         newStart = Math.min(originalEnd - 0.25, time); // 최소 15분 길이 보장
+         newStart = Math.max(config.start, newStart);
+      } else {
+         newEnd = Math.max(originalStart + 0.25, time);
+         newEnd = Math.min(config.end, newEnd);
+      }
+
+      // 화면 즉시 업데이트
+      const startP = ((newStart - config.start) / range) * 100;
+      const durP   = ((newEnd - newStart) / range) * 100;
+
+      if (isVertical) {
+         block.style.top = startP + '%'; block.style.height = durP + '%';
+      } else {
+         block.style.left = startP + '%'; block.style.width = durP + '%';
+      }
+      
+      block.dataset.newStart = newStart;
+      block.dataset.newEnd   = newEnd;
+    };
+
+    const onUp = (ev) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (block.dataset.newStart) {
+         sch.start = parseFloat(block.dataset.newStart);
+         sch.end   = parseFloat(block.dataset.newEnd);
+         saveSchedules();
+         renderView();
+       }
+    };
+    
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
+
+// ============================================================
+// IPC 수신
+// ============================================================
+
+// 달력에서 날짜 클릭 → 날짜 + Google 일정 수신
+window.electronAPI.on('change-date', (_, payload) => {
+  const { dateStr, googleEvents } = payload;
+  const parts = dateStr.split('-');
+  currentDate = new Date(parts[0], parts[1]-1, parts[2]);
+  document.getElementById('date').innerText = `${currentDate.getMonth()+1}/${currentDate.getDate()}`;
+
+  googleDayEvents = googleEvents || [];
+  renderView();
+});
+
+// ============================================================
+// 시작
+// ============================================================
+setInterval(updateTimeLine, 1000);
+init();

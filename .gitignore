@@ -9,6 +9,7 @@ build/
 out/
 *.appx
 *.exe
+credentials.json
 # 환경 변수 파일 (API 키 등 보안 정보가 있다면)
 .env
 

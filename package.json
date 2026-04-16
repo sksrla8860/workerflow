@@ -1,12 +1,12 @@
 {
   "name": "worker-flow",
   "productName": "WorkerFlow",
-  "version": "2.0.1",
+  "version": "2.0.6",
   "description": "Desktop Timeline Widget",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder"
+    "build:secure": "node build-secure.js && electron-builder"
   },
   "author": "shinetic",
   "license": "ISC",
@@ -16,14 +16,26 @@
   },
   "devDependencies": {
     "electron": "^34.0.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "fs-extra": "^11.3.4",
+    "javascript-obfuscator": "^5.4.1"
   },
   "build": {
     "appId": "com.shinetic.workerflow",
     "productName": "WorkerFlow",
+    "directories": {
+      "app": "release-src"
+    },
+    "files": [
+      "**/*",
+      "!dist",
+      "!dist.bak",
+      "!.git",
+      "!token.json",
+      "!node_modules/.cache"
+    ],
     "win": {
       "target": [
-        "nsis",
         "appx"
       ],
       "icon": "build/icon.png"
@@ -49,7 +61,14 @@
       "publisher": "CN=23DB3E70-433B-4176-AB45-5B57DA2514FB",
       "publisherDisplayName": "shinetic",
       "backgroundColor": "#03D8A7",
-      "languages": ["en-US", "ko-KR", "ja-JP", "zh-CN", "es-ES"]
+      "addAutoLaunchExtension": true,
+      "languages": [
+        "en-US",
+        "ko-KR",
+        "ja-JP",
+        "zh-CN",
+        "es-ES"
+      ]
     }
   }
 }

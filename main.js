@@ -18,7 +18,7 @@ let lastBounds = { position: 'bottom', size: 120 };
 let cachedGoogleEvents = [];
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
-const TOKEN_PATH = path.join(__dirname, 'token.json');
+const TOKEN_PATH = path.join(app.getPath('userData'), 'token.json');
 const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 
 
@@ -36,7 +36,7 @@ function createDayBarWindow() {
     backgroundColor: '#00000000',
     //backgroundMaterial: 'mica',
     show: false,
-    alwaysOnTop: false,
+    alwaysOnTop: true,
     //skipTaskbar: true,
     hasShadow: false,
     icon: path.join(__dirname, 'logo.png'),
@@ -65,7 +65,11 @@ function createDayBarWindow() {
 }
 
 function createCalendarWindow() {
-  if (calendarWin) return;
+  if (calendarWin) {
+    if (calendarWin.isMinimized()) calendarWin.restore();
+    calendarWin.focus();
+    return;
+  }
 
   calendarWin = new BrowserWindow({
     width: 900,
@@ -83,10 +87,14 @@ function createCalendarWindow() {
       contextIsolation: true,       // 🔥 보안: 격리 모드 켜기
       preload: path.join(__dirname, 'preload.js') // 🔥 검문소 연결
     }
-    //webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
 
+
   calendarWin.loadFile('calendar.html');
+  // 창이 닫힐 때 메모리 정리
+  calendarWin.on('closed', () => {
+    calendarWin = null;
+  });
   applyMaterialFix(calendarWin);
 
   calendarWin.once('ready-to-show', () => calendarWin.show());
@@ -301,6 +309,21 @@ ipcMain.on('open-calendar', () => {
   else createCalendarWindow();
 });
 
+// 구글 연동 버튼을 눌렀을 때 로그인 진행하기
+ipcMain.on('start-google-login', async (event) => {
+  try {
+    // 💡 여기에 기존에 앱 시작 시 실행하던 구글 인증 코드를 넣습니다.
+    const auth = await authorize();
+    
+    // 로그인 및 데이터 가져오기가 성공하면 화면(Renderer)으로 알림
+    event.sender.send('google-login-success', '연동 완료!');
+    
+  } catch (error) {
+    console.error('구글 연동 에러:', error);
+    event.sender.send('google-login-error', error.message);
+  }
+});
+
 ipcMain.on('update-widget-bounds', (_, b) => { lastBounds = b; updateBounds(false); });
 ipcMain.on('set-expand-mode',      (_, ex) => { updateBounds(ex); });
 ipcMain.on('change-language',      (_, lang) => { createSystemTray(lang); });
@@ -469,12 +492,13 @@ ipcMain.on('disconnect-google', async (event) => {
 // 7. 앱 생명주기
 // ============================================================
 app.whenReady().then(() => {
-  createDayBarWindow();
-  createCalendarWindow();
-  createSystemTray('en');
+  createDayBarWindow(); 
 });
 
-app.on('window-all-closed', () => { /* 트레이 앱 — 종료하지 않음 */ });
+app.on('window-all-closed', () => { 
+  // 트레이 앱이므로 창을 모두 닫아도 프로세스를 완전히 종료하지 않음
+});
+
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createDayBarWindow();
 });
